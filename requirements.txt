@@ -1,0 +1,5 @@
+click
+python-docx
+PyQt5
+qfluentwidgets
+scandir
