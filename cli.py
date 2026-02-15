@@ -6,7 +6,6 @@ import click
 from core import (
     DEFAULT_COMMENT_CHARS, DEFAULT_EXTS, DEFAULT_INDIRS, generate_code_doc
 )
-from gui import launch_gui
 
 
 @click.command(name='ccd')
@@ -93,6 +92,7 @@ def main(
         keep_comment_lines, gui, verbose
 ):
     if gui:
+        from gui import launch_gui
         launch_gui()
         return 0
     if not indirs:
