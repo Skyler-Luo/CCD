@@ -3,9 +3,8 @@ import logging
 
 import click
 
-from core import (
-    DEFAULT_COMMENT_CHARS, DEFAULT_EXTS, DEFAULT_INDIRS, generate_code_doc
-)
+from code_processor import DEFAULT_COMMENT_CHARS, DEFAULT_EXTS, DEFAULT_INDIRS
+from doc_generator import generate_code_doc
 
 
 @click.command(name='ccd')
@@ -92,7 +91,7 @@ def main(
         keep_comment_lines, gui, verbose
 ):
     if gui:
-        from gui import launch_gui
+        from ui_main import launch_gui
         launch_gui()
         return 0
     if not indirs:

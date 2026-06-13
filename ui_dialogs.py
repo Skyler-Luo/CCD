@@ -1,0 +1,827 @@
+# -*- coding: utf-8 -*-
+"""
+UI对话框模块
+包含所有GUI对话框组件
+"""
+import os
+from PyQt5.QtCore import QEvent, Qt, QUrl
+from PyQt5.QtGui import QDesktopServices, QPalette
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+    QDialog, QListWidget, QListWidgetItem,
+    QAbstractItemView, QDialogButtonBox, QStyle,
+    QStyleOptionViewItem, QMessageBox, QLabel, QComboBox
+)
+from qfluentwidgets import (
+    PushButton, LineEdit, BodyLabel, PrimaryPushButton, TextEdit
+)
+
+from code_processor import LANGUAGE_BY_EXT, decode_content, get_language_by_extension
+from logger import Logger
+
+# 注释前缀映射
+COMMENT_PREFIX_BY_LANG = {
+    'python': ['#', '"""', "'''"],
+    'javascript': ['//', '/*', '*/'],
+    'typescript': ['//', '/*', '*/'],
+    'go': ['//', '/*', '*/'],
+    'php': ['//', '#', '/*', '*/'],
+    'csharp': ['//', '/*', '*/'],
+    'kotlin': ['//', '/*', '*/'],
+    'swift': ['//', '/*', '*/'],
+    'rust': ['//', '/*', '*/'],
+    'dart': ['//', '/*', '*/'],
+    'scala': ['//', '/*', '*/'],
+    'sql': ['--', '/*', '*/'],
+    'r': ['#'],
+    'lua': ['--', '--[[', ']]'],
+    'powershell': ['#', '<#', '#>'],
+    'yaml': ['#'],
+    'java': ['//', '/*', '*/'],
+    'c': ['//', '/*', '*/'],
+    'cpp': ['//', '/*', '*/'],
+    'html': ['<!--', '-->'],
+    'xml': ['<!--', '-->'],
+    'css': ['/*', '*/'],
+    'shellscript': ['#'],
+    'ruby': ['#', '=begin', '=end'],
+    'perl': ['#', '=begin', '=end']
+}
+
+
+def format_file_size(size_bytes):
+    """格式化文件大小"""
+    if size_bytes < 1024:
+        return '{} B'.format(size_bytes)
+    elif size_bytes < 1024 * 1024:
+        return '{:.1f} KB'.format(size_bytes / 1024)
+    elif size_bytes < 1024 * 1024 * 1024:
+        return '{:.1f} MB'.format(size_bytes / (1024 * 1024))
+    else:
+        return '{:.1f} GB'.format(size_bytes / (1024 * 1024 * 1024))
+
+
+class ExtensionSelectDialog(QDialog):
+    """文件后缀选择对话框"""
+    def __init__(self, exts, selected, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('选择文件后缀')
+        self.resize(420, 480)
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(QPalette.Window, QApplication.palette().color(QPalette.Window))
+        palette.setColor(QPalette.Base, QApplication.palette().color(QPalette.Base))
+        self.setPalette(palette)
+        self.setWindowFlags((self.windowFlags() | Qt.Window) & ~Qt.WindowContextHelpButtonHint)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        header = BodyLabel('可选后缀')
+        header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
+        layout.addWidget(header)
+
+        hint = BodyLabel('请勾选需要提取的后缀')
+        hint.setStyleSheet('font-size: 12px; color: #6b7280;')
+        layout.addWidget(hint)
+
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QAbstractItemView.NoSelection)
+        self.list_widget.setAlternatingRowColors(True)
+        for ext in exts:
+            item = QListWidgetItem(ext)
+            if ext in selected:
+                item.setCheckState(Qt.Checked)
+            else:
+                item.setCheckState(Qt.Unchecked)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            self.list_widget.addItem(item)
+        layout.addWidget(self.list_widget, 1)
+
+        action_row = QWidget()
+        action_layout = QHBoxLayout(action_row)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(8)
+        self.select_all_btn = PushButton('全选')
+        self.clear_btn = PushButton('清空')
+        action_layout.addWidget(self.select_all_btn)
+        action_layout.addWidget(self.clear_btn)
+        action_layout.addStretch(1)
+        self.count_label = BodyLabel('')
+        self.count_label.setStyleSheet('font-size: 12px; color: #4b5563;')
+        action_layout.addWidget(self.count_label)
+        layout.addWidget(action_row)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.select_all_btn.clicked.connect(self._select_all)
+        self.clear_btn.clicked.connect(self._clear_all)
+        self.list_widget.itemChanged.connect(self._update_count)
+        self.list_widget.viewport().installEventFilter(self)
+        self._update_count()
+
+    def eventFilter(self, obj, event):
+        if obj is self.list_widget.viewport() and event.type() == QEvent.MouseButtonPress:
+            item = self.list_widget.itemAt(event.pos())
+            if item:
+                option = QStyleOptionViewItem()
+                option.rect = self.list_widget.visualItemRect(item)
+                option.state = QStyle.State_Enabled
+                if item.checkState() == Qt.Checked:
+                    option.state |= QStyle.State_On
+                else:
+                    option.state |= QStyle.State_Off
+                check_rect = self.list_widget.style().subElementRect(
+                    QStyle.SE_ItemViewItemCheckIndicator,
+                    option,
+                    self.list_widget
+                )
+                if not check_rect.contains(event.pos()):
+                    item.setCheckState(Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked)
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _select_all(self):
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if not item.isHidden():
+                item.setCheckState(Qt.Checked)
+
+    def _clear_all(self):
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.Unchecked)
+
+    def _update_count(self):
+        total = self.list_widget.count()
+        checked = sum(1 for i in range(total) if self.list_widget.item(i).checkState() == Qt.Checked)
+        self.count_label.setText('已选 {} / {}'.format(checked, total))
+
+    def get_selected(self):
+        selected = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() == Qt.Checked:
+                selected.append(item.text())
+        return sorted(selected)
+
+
+class CommentPrefixDialog(QDialog):
+    """注释前缀选择对话框"""
+    def __init__(self, langs, selected_langs, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('选择注释前缀')
+        self.resize(420, 460)
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(QPalette.Window, QApplication.palette().color(QPalette.Window))
+        palette.setColor(QPalette.Base, QApplication.palette().color(QPalette.Base))
+        self.setPalette(palette)
+        self.setWindowFlags((self.windowFlags() | Qt.Window) & ~Qt.WindowContextHelpButtonHint)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        header = BodyLabel('按语言选择注释前缀')
+        header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
+        layout.addWidget(header)
+
+        hint = BodyLabel('勾选语言后将应用对应的注释前缀')
+        hint.setStyleSheet('font-size: 12px; color: #6b7280;')
+        layout.addWidget(hint)
+
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QAbstractItemView.NoSelection)
+        self.list_widget.setAlternatingRowColors(True)
+        for lang in langs:
+            prefixes = list(COMMENT_PREFIX_BY_LANG.get(lang, []))
+            if lang in ('c', 'cpp', 'java', 'javascript', 'typescript') and '//' not in prefixes:
+                prefixes.insert(0, '//')
+            label = '{}  ({})'.format(lang, ', '.join(prefixes)) if prefixes else lang
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, lang)
+            if lang in selected_langs:
+                item.setCheckState(Qt.Checked)
+            else:
+                item.setCheckState(Qt.Unchecked)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            self.list_widget.addItem(item)
+        layout.addWidget(self.list_widget, 1)
+
+        action_row = QWidget()
+        action_layout = QHBoxLayout(action_row)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(8)
+        self.select_all_btn = PushButton('全选')
+        self.clear_btn = PushButton('清空')
+        action_layout.addWidget(self.select_all_btn)
+        action_layout.addWidget(self.clear_btn)
+        action_layout.addStretch(1)
+        self.count_label = BodyLabel('')
+        self.count_label.setStyleSheet('font-size: 12px; color: #4b5563;')
+        action_layout.addWidget(self.count_label)
+        layout.addWidget(action_row)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.select_all_btn.clicked.connect(self._select_all)
+        self.clear_btn.clicked.connect(self._clear_all)
+        self.list_widget.itemChanged.connect(self._update_count)
+        self.list_widget.viewport().installEventFilter(self)
+        self._update_count()
+
+    def eventFilter(self, obj, event):
+        if obj is self.list_widget.viewport() and event.type() == QEvent.MouseButtonPress:
+            item = self.list_widget.itemAt(event.pos())
+            if item:
+                option = QStyleOptionViewItem()
+                option.rect = self.list_widget.visualItemRect(item)
+                option.state = QStyle.State_Enabled
+                if item.checkState() == Qt.Checked:
+                    option.state |= QStyle.State_On
+                else:
+                    option.state |= QStyle.State_Off
+                check_rect = self.list_widget.style().subElementRect(
+                    QStyle.SE_ItemViewItemCheckIndicator,
+                    option,
+                    self.list_widget
+                )
+                if not check_rect.contains(event.pos()):
+                    item.setCheckState(Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked)
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _select_all(self):
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.Checked)
+
+    def _clear_all(self):
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.Unchecked)
+
+    def _update_count(self):
+        total = self.list_widget.count()
+        checked = sum(1 for i in range(total) if self.list_widget.item(i).checkState() == Qt.Checked)
+        self.count_label.setText('已选 {} / {}'.format(checked, total))
+
+    def get_selected_langs(self):
+        selected = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() == Qt.Checked:
+                selected.append(item.data(Qt.UserRole))
+        return selected
+
+    def get_selected_prefixes(self):
+        prefixes = []
+        for lang in self.get_selected_langs():
+            for prefix in COMMENT_PREFIX_BY_LANG.get(lang, []):
+                if prefix not in prefixes:
+                    prefixes.append(prefix)
+        return prefixes
+
+
+
+class FileSelectDialog(QDialog):
+    """文件多选对话框，左右两栏布局，支持多选、顺序调整和文件预览"""
+    def __init__(self, files, selected_files, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('选择源文件并排序')
+        self.resize(900, 700)
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(QPalette.Window, QApplication.palette().color(QPalette.Window))
+        palette.setColor(QPalette.Base, QApplication.palette().color(QPalette.Base))
+        self.setPalette(palette)
+        self.setWindowFlags((self.windowFlags() | Qt.Window) & ~Qt.WindowContextHelpButtonHint)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(12)
+        
+        self.encoding = 'auto'  # 编码设置
+
+        # 标题和提示
+        header = BodyLabel('选择源文件并排序')
+        header.setStyleSheet('font-size: 14px; font-weight: 600; color: #374151;')
+        main_layout.addWidget(header)
+
+        hint = BodyLabel('从左侧选择文件添加到右侧，可调整右侧文件顺序，支持多选操作')
+        hint.setStyleSheet('font-size: 12px; color: #6b7280;')
+        main_layout.addWidget(hint)
+
+        # 主要内容区域：左右两栏 + 中间按钮
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(12)
+        
+        # 左栏：可选文件
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
+        
+        left_header = BodyLabel('可选文件')
+        left_header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
+        left_layout.addWidget(left_header)
+        
+        self.search_box = LineEdit()
+        self.search_box.setPlaceholderText('搜索文件...')
+        self.search_box.textChanged.connect(self._filter_available_files)
+        left_layout.addWidget(self.search_box)
+        
+        self.available_list = QListWidget()
+        self.available_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.available_list.setAlternatingRowColors(True)
+        left_layout.addWidget(self.available_list, 1)
+        
+        self.available_count_label = BodyLabel('')
+        self.available_count_label.setStyleSheet('font-size: 11px; color: #6b7280;')
+        left_layout.addWidget(self.available_count_label)
+        
+        content_layout.addWidget(left_panel, 1)
+        
+        # 中间按钮区域
+        middle_panel = QWidget()
+        middle_layout = QVBoxLayout(middle_panel)
+        middle_layout.setContentsMargins(0, 0, 0, 0)
+        middle_layout.setSpacing(8)
+        middle_layout.addStretch(1)
+        
+        self.add_btn = PrimaryPushButton('添加 >>')
+        self.add_btn.setMinimumWidth(100)
+        self.add_btn.setMinimumHeight(36)
+        middle_layout.addWidget(self.add_btn)
+        
+        self.add_all_btn = PushButton('全部添加')
+        self.add_all_btn.setMinimumWidth(100)
+        middle_layout.addWidget(self.add_all_btn)
+        
+        middle_layout.addSpacing(20)
+        
+        self.remove_btn = PushButton('<< 移除')
+        self.remove_btn.setMinimumWidth(100)
+        self.remove_btn.setMinimumHeight(36)
+        middle_layout.addWidget(self.remove_btn)
+        
+        self.remove_all_btn = PushButton('全部移除')
+        self.remove_all_btn.setMinimumWidth(100)
+        middle_layout.addWidget(self.remove_all_btn)
+        
+        middle_layout.addStretch(1)
+        content_layout.addWidget(middle_panel)
+        
+        # 右栏：已选文件
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+        
+        right_header = BodyLabel('已选文件（按顺序生成）')
+        right_header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
+        right_layout.addWidget(right_header)
+        
+        self.selected_list = QListWidget()
+        self.selected_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.selected_list.setAlternatingRowColors(True)
+        right_layout.addWidget(self.selected_list, 1)
+        
+        # 排序按钮
+        order_buttons = QHBoxLayout()
+        order_buttons.setSpacing(8)
+        
+        self.move_top_btn = PushButton('置顶')
+        self.move_up_btn = PushButton('上移')
+        self.move_down_btn = PushButton('下移')
+        self.move_bottom_btn = PushButton('置底')
+        
+        order_buttons.addWidget(self.move_top_btn)
+        order_buttons.addWidget(self.move_up_btn)
+        order_buttons.addWidget(self.move_down_btn)
+        order_buttons.addWidget(self.move_bottom_btn)
+        order_buttons.addStretch(1)
+        
+        right_layout.addLayout(order_buttons)
+        
+        self.selected_count_label = BodyLabel('')
+        self.selected_count_label.setStyleSheet('font-size: 11px; color: #6b7280;')
+        right_layout.addWidget(self.selected_count_label)
+        
+        content_layout.addWidget(right_panel, 1)
+        
+        main_layout.addLayout(content_layout, 1)
+        
+        # 预览面板
+        preview_panel = QWidget()
+        preview_layout = QVBoxLayout(preview_panel)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(8)
+        
+        preview_header_layout = QHBoxLayout()
+        preview_header = BodyLabel('文件预览')
+        preview_header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
+        preview_header_layout.addWidget(preview_header)
+        
+        self.preview_lines_label = BodyLabel('预览行数:')
+        self.preview_lines_label.setStyleSheet('font-size: 11px; color: #6b7280;')
+        self.preview_lines_combo = QComboBox()
+        self.preview_lines_combo.addItems(['20', '50', '100', '200'])
+        self.preview_lines_combo.setCurrentText('50')
+        self.preview_lines_combo.setFixedWidth(80)
+        self.preview_lines_combo.currentTextChanged.connect(self._refresh_preview)
+        preview_header_layout.addWidget(self.preview_lines_label)
+        preview_header_layout.addWidget(self.preview_lines_combo)
+        preview_header_layout.addStretch(1)
+        
+        self.preview_info_label = BodyLabel('')
+        self.preview_info_label.setStyleSheet('font-size: 11px; color: #6b7280;')
+        preview_header_layout.addWidget(self.preview_info_label)
+        
+        preview_layout.addLayout(preview_header_layout)
+        
+        self.preview_text = TextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setPlaceholderText('点击文件名查看预览...')
+        self.preview_text.setMinimumHeight(150)
+        self.preview_text.setMaximumHeight(200)
+        from PyQt5.QtGui import QFont
+        preview_font = QFont('Consolas', 9)
+        if not preview_font.exactMatch():
+            preview_font = QFont('Courier New', 9)
+        self.preview_text.setFont(preview_font)
+        preview_layout.addWidget(self.preview_text)
+        
+        main_layout.addWidget(preview_panel)
+        
+        # 底部按钮
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        main_layout.addWidget(buttons)
+        
+        # 初始化数据
+        self.all_files = files
+        self._current_preview_file = None
+        self._init_file_lists(files, selected_files)
+        
+        # 连接信号
+        self.add_btn.clicked.connect(self._add_selected)
+        self.add_all_btn.clicked.connect(self._add_all)
+        self.remove_btn.clicked.connect(self._remove_selected)
+        self.remove_all_btn.clicked.connect(self._remove_all)
+        self.move_top_btn.clicked.connect(self._move_to_top)
+        self.move_up_btn.clicked.connect(self._move_up)
+        self.move_down_btn.clicked.connect(self._move_down)
+        self.move_bottom_btn.clicked.connect(self._move_to_bottom)
+        
+        self.available_list.itemDoubleClicked.connect(self._on_available_double_click)
+        self.selected_list.itemDoubleClicked.connect(self._on_selected_double_click)
+        self.available_list.itemClicked.connect(self._on_file_clicked)
+        self.selected_list.itemClicked.connect(self._on_file_clicked)
+        
+        self._update_counts()
+    
+    def _init_file_lists(self, files, selected_files):
+        """初始化左右两栏的文件列表"""
+        selected_set = set(selected_files) if selected_files else set()
+        
+        for file in selected_files:
+            if file in files:
+                self.selected_list.addItem(file)
+        
+        for file in files:
+            if file not in selected_set:
+                self.available_list.addItem(file)
+    
+    def _add_selected(self):
+        """将左栏选中的文件添加到右栏"""
+        selected_items = self.available_list.selectedItems()
+        for item in selected_items:
+            row = self.available_list.row(item)
+            self.available_list.takeItem(row)
+            self.selected_list.addItem(item.text())
+        self._update_counts()
+    
+    def _add_all(self):
+        """将所有可见的可选文件添加到右栏"""
+        items_to_add = [self.available_list.item(i).text() 
+                       for i in range(self.available_list.count()) 
+                       if not self.available_list.item(i).isHidden()]
+        
+        i = self.available_list.count() - 1
+        while i >= 0:
+            if not self.available_list.item(i).isHidden():
+                self.available_list.takeItem(i)
+            i -= 1
+        
+        for file_path in items_to_add:
+            self.selected_list.addItem(file_path)
+        self._update_counts()
+    
+    def _remove_selected(self):
+        """将右栏选中的文件移回左栏"""
+        selected_items = self.selected_list.selectedItems()
+        for item in selected_items:
+            row = self.selected_list.row(item)
+            self.selected_list.takeItem(row)
+            self.available_list.addItem(item.text())
+        self._update_counts()
+    
+    def _remove_all(self):
+        """将所有已选文件移回左栏"""
+        while self.selected_list.count() > 0:
+            item = self.selected_list.takeItem(0)
+            self.available_list.addItem(item.text())
+        self._update_counts()
+    
+    def _move_to_top(self):
+        """将选中的项移到顶部"""
+        selected_items = self.selected_list.selectedItems()
+        if not selected_items:
+            return
+        items_text = [item.text() for item in selected_items]
+        for item in selected_items:
+            self.selected_list.takeItem(self.selected_list.row(item))
+        for i, text in enumerate(items_text):
+            self.selected_list.insertItem(i, text)
+            self.selected_list.item(i).setSelected(True)
+    
+    def _move_up(self):
+        """将选中的项上移一位"""
+        selected_items = self.selected_list.selectedItems()
+        if not selected_items:
+            return
+        rows = sorted([self.selected_list.row(item) for item in selected_items])
+        for row in rows:
+            if row > 0:
+                item = self.selected_list.takeItem(row)
+                self.selected_list.insertItem(row - 1, item)
+                item.setSelected(True)
+    
+    def _move_down(self):
+        """将选中的项下移一位"""
+        selected_items = self.selected_list.selectedItems()
+        if not selected_items:
+            return
+        rows = sorted([self.selected_list.row(item) for item in selected_items], reverse=True)
+        for row in rows:
+            if row < self.selected_list.count() - 1:
+                item = self.selected_list.takeItem(row)
+                self.selected_list.insertItem(row + 1, item)
+                item.setSelected(True)
+    
+    def _move_to_bottom(self):
+        """将选中的项移到底部"""
+        selected_items = self.selected_list.selectedItems()
+        if not selected_items:
+            return
+        items_text = [item.text() for item in selected_items]
+        for item in selected_items:
+            self.selected_list.takeItem(self.selected_list.row(item))
+        for text in items_text:
+            self.selected_list.addItem(text)
+            self.selected_list.item(self.selected_list.count() - 1).setSelected(True)
+    
+    def _filter_available_files(self, text):
+        """根据搜索文本过滤左栏文件列表"""
+        for i in range(self.available_list.count()):
+            item = self.available_list.item(i)
+            item.setHidden(text.lower() not in item.text().lower())
+        self._update_counts()
+    
+    def _on_available_double_click(self, item):
+        """双击左栏文件，添加到右栏"""
+        row = self.available_list.row(item)
+        self.available_list.takeItem(row)
+        self.selected_list.addItem(item.text())
+        self._update_counts()
+    
+    def _on_selected_double_click(self, item):
+        """双击右栏文件，移回左栏"""
+        row = self.selected_list.row(item)
+        self.selected_list.takeItem(row)
+        self.available_list.addItem(item.text())
+        self._update_counts()
+    
+    def _on_file_clicked(self, item):
+        """单击文件时显示预览"""
+        if item:
+            self._preview_file(item.text())
+    
+    def _refresh_preview(self):
+        """刷新当前预览"""
+        if self._current_preview_file:
+            self._preview_file(self._current_preview_file)
+    
+    def _preview_file(self, file_path):
+        """预览文件内容"""
+        self._current_preview_file = file_path
+        
+        if not os.path.exists(file_path):
+            self.preview_text.setText('文件不存在: {}'.format(file_path))
+            self.preview_info_label.setText('')
+            return
+        
+        try:
+            file_size = os.path.getsize(file_path)
+            size_str = format_file_size(file_size)
+            
+            max_lines = int(self.preview_lines_combo.currentText())
+            content = decode_content(file_path, self.encoding)
+            
+            all_lines = content.splitlines()
+            total_lines = len(all_lines)
+            
+            preview_lines = all_lines[:max_lines]
+            preview_content = '\n'.join(preview_lines)
+            
+            if total_lines > max_lines:
+                preview_content += '\n\n... (省略 {} 行，共 {} 行)'.format(
+                    total_lines - max_lines, total_lines
+                )
+            
+            self.preview_text.setText(preview_content)
+            
+            file_name = os.path.basename(file_path)
+            language = get_language_by_extension(file_path)
+            lang_str = ' | 语言: {}'.format(language) if language else ''
+            self.preview_info_label.setText('文件: {} | 大小: {} | 总行数: {}{}'.format(
+                file_name, size_str, total_lines, lang_str
+            ))
+            
+        except Exception as e:
+            self.preview_text.setText('无法预览文件:\n{}'.format(str(e)))
+            self.preview_info_label.setText('预览失败')
+    
+    def _update_counts(self):
+        """更新统计信息"""
+        available_visible = sum(1 for i in range(self.available_list.count()) 
+                               if not self.available_list.item(i).isHidden())
+        self.available_count_label.setText('可选: {} 项'.format(available_visible))
+        
+        selected_count = self.selected_list.count()
+        self.selected_count_label.setText('已选: {} 项'.format(selected_count))
+    
+    def get_selected(self):
+        """返回选中的文件列表，按照右栏顺序"""
+        return [self.selected_list.item(i).text() for i in range(self.selected_list.count())]
+    
+    def get_all_ordered(self):
+        """返回所有文件的当前顺序（已选文件在前）"""
+        ordered = self.get_selected()
+        ordered.extend([self.available_list.item(i).text() for i in range(self.available_list.count())])
+        return ordered
+
+
+
+class LogViewDialog(QDialog):
+    """日志查看对话框"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('查看日志')
+        self.resize(900, 600)
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(QPalette.Window, QApplication.palette().color(QPalette.Window))
+        palette.setColor(QPalette.Base, QApplication.palette().color(QPalette.Base))
+        self.setPalette(palette)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+        
+        # 标题
+        from qfluentwidgets import TitleLabel, ComboBox
+        header = TitleLabel('日志查看')
+        layout.addWidget(header)
+        
+        # 日志类型选择
+        type_row = QWidget()
+        type_layout = QHBoxLayout(type_row)
+        type_layout.setContentsMargins(0, 0, 0, 0)
+        type_layout.setSpacing(8)
+        
+        type_label = BodyLabel('日志类型:')
+        self.log_type_combo = ComboBox()
+        self.log_type_combo.addItems(['全部日志', '错误日志'])
+        self.log_type_combo.currentTextChanged.connect(self._load_log)
+        type_layout.addWidget(type_label)
+        type_layout.addWidget(self.log_type_combo)
+        type_layout.addStretch(1)
+        
+        self.refresh_btn = PushButton('刷新')
+        self.refresh_btn.clicked.connect(self._load_log)
+        type_layout.addWidget(self.refresh_btn)
+        
+        self.open_dir_btn = PushButton('打开日志目录')
+        self.open_dir_btn.clicked.connect(self._open_log_dir)
+        type_layout.addWidget(self.open_dir_btn)
+        
+        self.clear_btn = PushButton('清空当前日志')
+        self.clear_btn.clicked.connect(self._clear_log)
+        type_layout.addWidget(self.clear_btn)
+        
+        layout.addWidget(type_row)
+        
+        # 日志信息
+        self.log_info_label = BodyLabel('')
+        self.log_info_label.setStyleSheet('font-size: 11px; color: #6b7280;')
+        layout.addWidget(self.log_info_label)
+        
+        # 日志内容
+        self.log_text = TextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setPlaceholderText('暂无日志...')
+        
+        from PyQt5.QtGui import QFont
+        log_font = QFont('Consolas', 9)
+        if not log_font.exactMatch():
+            log_font = QFont('Courier New', 9)
+        self.log_text.setFont(log_font)
+        layout.addWidget(self.log_text, 1)
+        
+        # 底部按钮
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.accept)
+        layout.addWidget(buttons)
+        
+        self._load_log()
+    
+    def _get_current_log_file(self):
+        """获取当前选择的日志文件路径"""
+        logger_instance = Logger()
+        if self.log_type_combo.currentText() == '错误日志':
+            return logger_instance.error_log_file
+        else:
+            return logger_instance.log_file
+    
+    def _load_log(self):
+        """加载日志内容"""
+        log_file = self._get_current_log_file()
+        
+        if not os.path.exists(log_file):
+            self.log_text.setText('日志文件不存在')
+            self.log_info_label.setText(f'文件: {log_file}')
+            return
+        
+        try:
+            file_size = os.path.getsize(log_file)
+            size_str = format_file_size(file_size)
+            
+            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+                
+            total_lines = len(lines)
+            max_lines = 10000
+            
+            if total_lines > max_lines:
+                display_lines = lines[-max_lines:]
+                content = ''.join(display_lines)
+                content = f'... (省略前 {total_lines - max_lines} 行)\n\n' + content
+            else:
+                content = ''.join(lines)
+            
+            self.log_text.setText(content)
+            
+            cursor = self.log_text.textCursor()
+            cursor.movePosition(cursor.End)
+            self.log_text.setTextCursor(cursor)
+            
+            self.log_info_label.setText(f'文件: {os.path.basename(log_file)} | 大小: {size_str} | 总行数: {total_lines}')
+            
+        except Exception as e:
+            self.log_text.setText(f'读取日志失败:\n{str(e)}')
+            self.log_info_label.setText('读取失败')
+    
+    def _open_log_dir(self):
+        """打开日志目录"""
+        logger_instance = Logger()
+        log_dir = logger_instance.log_dir
+        if os.path.exists(log_dir):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(log_dir))
+        else:
+            QMessageBox.warning(self, '目录不存在', f'日志目录不存在:\n{log_dir}')
+    
+    def _clear_log(self):
+        """清空当前日志文件"""
+        reply = QMessageBox.question(
+            self,
+            '确认清空',
+            '确定要清空当前日志文件吗？此操作不可恢复。',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            log_file = self._get_current_log_file()
+            try:
+                with open(log_file, 'w', encoding='utf-8') as f:
+                    f.write('')
+                self._load_log()
+                QMessageBox.information(self, '成功', '日志已清空')
+            except Exception as e:
+                QMessageBox.critical(self, '失败', f'清空日志失败:\n{str(e)}')
