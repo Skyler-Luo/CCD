@@ -26,8 +26,8 @@ from doc_generator import generate_code_doc
     multiple=True, help='注释字符串，可以指定多个，默认为#、//'
 )
 @click.option(
-    '--font-name', default='宋体',
-    help='字体，默认为宋体'
+    '--font-name', default='Consolas',
+    help='字体，默认为Consolas'
 )
 @click.option(
     '--font-size', default=10.5,

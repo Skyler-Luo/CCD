@@ -3,3 +3,4 @@ python-docx
 PyQt5
 qfluentwidgets
 scandir
+pywin32

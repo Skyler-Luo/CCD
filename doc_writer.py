@@ -50,17 +50,20 @@ class CodeWriter:
         - 字体、字号、段前/段后/行距
         - 空行/注释过滤
         - docx 模板
-        - 页眉字体独立设置
+        - 页眉和页脚字体独立设置
         - 页脚页码格式自定义
     """
     def __init__(
-            self, font_name='宋体',
+            self, font_name='Consolas',
             font_size=10.5, space_before=0.0,
             space_after=2.3, line_spacing=10.5,
             command_chars=None, document=None,
             template_path=None, skip_blank_lines=True,
             skip_comment_lines=True, encoding='utf-8',
             header_font='宋体', header_font_size=10.5,
+            top_margin=2.5, bottom_margin=2.5,
+            left_margin=2.5, right_margin=2.5,
+            header_distance=1.5, footer_distance=1.75,
             page_number_format='第 {page} 页 共 {total} 页'
     ):
         Document, Pt, WD_PARAGRAPH_ALIGNMENT = load_docx_dependencies()
@@ -79,6 +82,17 @@ class CodeWriter:
         self._Pt = Pt
         self._WD_PARAGRAPH_ALIGNMENT = WD_PARAGRAPH_ALIGNMENT
         self.document = document if document else create_document(template_path, Document)
+        
+        # 设置页面边距（可自定义，默认为软著标准）
+        from docx.shared import Cm
+        for section in self.document.sections:
+            section.top_margin = Cm(top_margin)           # 上边距
+            section.bottom_margin = Cm(bottom_margin)     # 下边距
+            section.left_margin = Cm(left_margin)         # 左边距
+            section.right_margin = Cm(right_margin)       # 右边距
+            section.header_distance = Cm(header_distance) # 页眉距离页面顶端
+            section.footer_distance = Cm(footer_distance) # 页脚距离页面底端
+        
         self.total_lines = 0
 
     @staticmethod
@@ -92,16 +106,52 @@ class CodeWriter:
         return any(line.startswith(ch) for ch in self.command_chars)
 
     def write_header(self, title):
-        """写入页眉标题，使用独立的页眉字体设置"""
+        """写入页眉标题，使用独立的页眉和页脚字体设置"""
         from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
         
-        paragraph = self.document.sections[0].header.paragraphs[0]
+        section = self.document.sections[0]
+        header = section.header
+        
+        # 清空页眉中的所有段落
+        while len(header.paragraphs) > 0:
+            p = header.paragraphs[0]
+            p._element.getparent().remove(p._element)
+        
+        # 重新添加一个干净的段落
+        paragraph = header.add_paragraph()
         paragraph.alignment = self._WD_PARAGRAPH_ALIGNMENT.CENTER
+        
+        # 设置段落格式 - 紧凑无间距
+        pf = paragraph.paragraph_format
+        pf.space_before = self._Pt(0)
+        pf.space_after = self._Pt(0)
+        pf.line_spacing = 1.0  # 单倍行距
+        pf.widow_control = False
+        pf.keep_together = True
+        
+        # 在XML层面设置段落属性
+        pPr = paragraph._element.get_or_add_pPr()
+        
+        # 设置段落间距为0
+        spacing = OxmlElement('w:spacing')
+        spacing.set(qn('w:before'), '0')
+        spacing.set(qn('w:after'), '0')
+        spacing.set(qn('w:line'), '240')  # 240 twips = 单倍行距
+        spacing.set(qn('w:lineRule'), 'auto')
+        pPr.append(spacing)
+        
+        # 添加 suppress line numbers（不显示行号）
+        suppress = OxmlElement('w:suppressLineNumbers')
+        pPr.append(suppress)
+        
+        # 添加文本
         run = paragraph.add_run(title)
         run.font.name = self.header_font
         run.font.size = self._Pt(self.header_font_size)
         # 为中文字体设置东亚字体属性
         run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+        
         return self
     
     def write_footer(self):
@@ -111,8 +161,28 @@ class CodeWriter:
         
         section = self.document.sections[0]
         footer = section.footer
-        footer_para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+        
+        # 清空页脚中的所有段落
+        for para in footer.paragraphs:
+            para._element.getparent().remove(para._element)
+        
+        # 重新添加一个干净的段落
+        footer_para = footer.add_paragraph()
         footer_para.alignment = self._WD_PARAGRAPH_ALIGNMENT.CENTER
+        
+        # 禁止页脚换行 - 多重设置确保不换行
+        footer_para.paragraph_format.widow_control = False
+        footer_para.paragraph_format.keep_together = True
+        footer_para.paragraph_format.keep_with_next = False
+        footer_para.paragraph_format.space_before = self._Pt(0)
+        footer_para.paragraph_format.space_after = self._Pt(0)
+        footer_para.paragraph_format.line_spacing = 1.0  # 单倍行距，与页眉保持一致
+        
+        # 在XML层面禁止换行
+        pPr = footer_para._element.get_or_add_pPr()
+        # 添加 keepLines 元素（保持行在一起）
+        keep_lines = OxmlElement('w:keepLines')
+        pPr.append(keep_lines)
         
         # 如果格式包含 {page} 和 {total}，使用域代码
         if '{page}' in self.page_number_format and '{total}' in self.page_number_format:

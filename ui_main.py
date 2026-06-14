@@ -5,11 +5,15 @@ UI主窗口模块
 """
 import os
 import sys
+
+# 抑制 libpng 警告
+os.environ['QT_LOGGING_RULES'] = '*.debug=false;qt.qpa.*=false'
+
 from PyQt5.QtCore import QEvent, Qt, QTimer, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QFileDialog, QScrollArea, QMainWindow
+    QFileDialog, QScrollArea, QMainWindow, QDialog
 )
 from qfluentwidgets import (
     PrimaryPushButton, PushButton, LineEdit, TextEdit,
@@ -241,64 +245,183 @@ class GeneratorWindow(QMainWindow):
 
         layout.addWidget(output_group)
 
+        # 排版设置 - 使用分组优化布局
         style_group, style_layout = self._create_group('排版设置')
-        style_grid = QGridLayout()
-        style_grid.setHorizontalSpacing(12)
-        style_grid.setVerticalSpacing(12)
-        style_grid.setColumnStretch(1, 1)
-        style_grid.setColumnMinimumWidth(0, 110)
-        style_layout.addLayout(style_grid)
+        
+        # === 字体设置 ===
+        font_section = BodyLabel('字体设置')
+        font_section.setStyleSheet('font-size: 12px; font-weight: 600; color: #374151; margin-top: 4px;')
+        style_layout.addWidget(font_section)
+        
+        font_grid = QGridLayout()
+        font_grid.setHorizontalSpacing(12)
+        font_grid.setVerticalSpacing(10)
+        font_grid.setColumnStretch(1, 1)
+        font_grid.setColumnMinimumWidth(0, 120)
+        style_layout.addLayout(font_grid)
 
         self.font_name_edit = ComboBox()
-        self.font_name_edit.addItems(['宋体', '微软雅黑', '黑体', '仿宋', '楷体', 'Consolas', 'Courier New', 'Arial', 'Times New Roman'])
-        self.font_name_edit.setCurrentText('宋体')
+        self.font_name_edit.addItems(['Arial', 'Consolas', 'Courier New', 'Times New Roman', '仿宋', '黑体', '楷体', '宋体', '微软雅黑'])
+        self.font_name_edit.setCurrentText('Consolas')
         self.font_name_edit.setMinimumHeight(32)
-        style_grid.addWidget(BodyLabel('正文字体'), 0, 0)
-        style_grid.addWidget(self.font_name_edit, 0, 1)
+        font_grid.addWidget(BodyLabel('正文字体'), 0, 0)
+        font_grid.addWidget(self.font_name_edit, 0, 1)
 
         self.font_size_spin = DoubleSpinBox()
         self.font_size_spin.setRange(1.0, 72.0)
         self.font_size_spin.setValue(10.5)
         self.font_size_spin.setMinimumHeight(32)
-        style_grid.addWidget(BodyLabel('正文字号'), 1, 0)
-        style_grid.addWidget(self.font_size_spin, 1, 1)
+        font_grid.addWidget(BodyLabel('正文字号'), 1, 0)
+        font_grid.addWidget(self.font_size_spin, 1, 1)
 
-        # 页眉字体
         self.header_font_combo = ComboBox()
-        self.header_font_combo.addItems(['宋体', '微软雅黑', '黑体', '仿宋', '楷体', 'Arial', 'Times New Roman'])
+        self.header_font_combo.addItems(['Arial', 'Times New Roman', '仿宋', '黑体', '楷体', '宋体', '微软雅黑'])
         self.header_font_combo.setCurrentText('宋体')
         self.header_font_combo.setMinimumHeight(32)
-        style_grid.addWidget(BodyLabel('页眉字体'), 2, 0)
-        style_grid.addWidget(self.header_font_combo, 2, 1)
+        font_grid.addWidget(BodyLabel('页眉页脚字体'), 2, 0)
+        font_grid.addWidget(self.header_font_combo, 2, 1)
 
-        # 页眉字号
         self.header_font_size_spin = DoubleSpinBox()
         self.header_font_size_spin.setRange(1.0, 72.0)
         self.header_font_size_spin.setValue(10.5)
         self.header_font_size_spin.setMinimumHeight(32)
-        style_grid.addWidget(BodyLabel('页眉字号'), 3, 0)
-        style_grid.addWidget(self.header_font_size_spin, 3, 1)
+        font_grid.addWidget(BodyLabel('页眉页脚字号'), 3, 0)
+        font_grid.addWidget(self.header_font_size_spin, 3, 1)
+
+        # 分隔线
+        from qfluentwidgets import HorizontalSeparator
+        style_layout.addSpacing(8)
+        style_layout.addWidget(HorizontalSeparator())
+        style_layout.addSpacing(8)
+
+        # === 段落设置 ===
+        para_section = BodyLabel('段落设置')
+        para_section.setStyleSheet('font-size: 12px; font-weight: 600; color: #374151;')
+        style_layout.addWidget(para_section)
+        
+        para_grid = QGridLayout()
+        para_grid.setHorizontalSpacing(12)
+        para_grid.setVerticalSpacing(10)
+        para_grid.setColumnStretch(1, 1)
+        para_grid.setColumnMinimumWidth(0, 120)
+        style_layout.addLayout(para_grid)
 
         self.space_before_spin = DoubleSpinBox()
         self.space_before_spin.setRange(0.0, 72.0)
         self.space_before_spin.setValue(0.0)
         self.space_before_spin.setMinimumHeight(32)
-        style_grid.addWidget(BodyLabel('段前间距'), 4, 0)
-        style_grid.addWidget(self.space_before_spin, 4, 1)
+        para_grid.addWidget(BodyLabel('段前间距(pt)'), 0, 0)
+        para_grid.addWidget(self.space_before_spin, 0, 1)
 
         self.space_after_spin = DoubleSpinBox()
         self.space_after_spin.setRange(0.0, 72.0)
         self.space_after_spin.setValue(2.3)
         self.space_after_spin.setMinimumHeight(32)
-        style_grid.addWidget(BodyLabel('段后间距'), 5, 0)
-        style_grid.addWidget(self.space_after_spin, 5, 1)
+        para_grid.addWidget(BodyLabel('段后间距(pt)'), 1, 0)
+        para_grid.addWidget(self.space_after_spin, 1, 1)
 
         self.line_spacing_spin = DoubleSpinBox()
         self.line_spacing_spin.setRange(0.0, 72.0)
         self.line_spacing_spin.setValue(10.5)
         self.line_spacing_spin.setMinimumHeight(32)
-        style_grid.addWidget(BodyLabel('行距'), 6, 0)
-        style_grid.addWidget(self.line_spacing_spin, 6, 1)
+        para_grid.addWidget(BodyLabel('行距(pt)'), 2, 0)
+        para_grid.addWidget(self.line_spacing_spin, 2, 1)
+
+        # 分隔线
+        style_layout.addSpacing(8)
+        style_layout.addWidget(HorizontalSeparator())
+        style_layout.addSpacing(8)
+
+        # === 页面边距 ===
+        margin_section = BodyLabel('页面边距')
+        margin_section.setStyleSheet('font-size: 12px; font-weight: 600; color: #374151;')
+        style_layout.addWidget(margin_section)
+        
+        margin_grid = QGridLayout()
+        margin_grid.setHorizontalSpacing(12)
+        margin_grid.setVerticalSpacing(10)
+        margin_grid.setColumnStretch(1, 1)
+        margin_grid.setColumnStretch(3, 1)
+        margin_grid.setColumnMinimumWidth(0, 60)
+        margin_grid.setColumnMinimumWidth(2, 60)
+        style_layout.addLayout(margin_grid)
+
+        self.top_margin_spin = DoubleSpinBox()
+        self.top_margin_spin.setRange(0.0, 10.0)
+        self.top_margin_spin.setValue(2.5)
+        self.top_margin_spin.setSingleStep(0.1)
+        self.top_margin_spin.setDecimals(2)
+        self.top_margin_spin.setSuffix(' cm')
+        self.top_margin_spin.setMinimumHeight(32)
+        margin_grid.addWidget(BodyLabel('上边距'), 0, 0)
+        margin_grid.addWidget(self.top_margin_spin, 0, 1)
+
+        self.bottom_margin_spin = DoubleSpinBox()
+        self.bottom_margin_spin.setRange(0.0, 10.0)
+        self.bottom_margin_spin.setValue(2.5)
+        self.bottom_margin_spin.setSingleStep(0.1)
+        self.bottom_margin_spin.setDecimals(2)
+        self.bottom_margin_spin.setSuffix(' cm')
+        self.bottom_margin_spin.setMinimumHeight(32)
+        margin_grid.addWidget(BodyLabel('下边距'), 0, 2)
+        margin_grid.addWidget(self.bottom_margin_spin, 0, 3)
+
+        self.left_margin_spin = DoubleSpinBox()
+        self.left_margin_spin.setRange(0.0, 10.0)
+        self.left_margin_spin.setValue(2.5)
+        self.left_margin_spin.setSingleStep(0.1)
+        self.left_margin_spin.setDecimals(2)
+        self.left_margin_spin.setSuffix(' cm')
+        self.left_margin_spin.setMinimumHeight(32)
+        margin_grid.addWidget(BodyLabel('左边距'), 1, 0)
+        margin_grid.addWidget(self.left_margin_spin, 1, 1)
+
+        self.right_margin_spin = DoubleSpinBox()
+        self.right_margin_spin.setRange(0.0, 10.0)
+        self.right_margin_spin.setValue(2.5)
+        self.right_margin_spin.setSingleStep(0.1)
+        self.right_margin_spin.setDecimals(2)
+        self.right_margin_spin.setSuffix(' cm')
+        self.right_margin_spin.setMinimumHeight(32)
+        margin_grid.addWidget(BodyLabel('右边距'), 1, 2)
+        margin_grid.addWidget(self.right_margin_spin, 1, 3)
+
+        self.header_distance_spin = DoubleSpinBox()
+        self.header_distance_spin.setRange(0.0, 10.0)
+        self.header_distance_spin.setValue(1.5)
+        self.header_distance_spin.setSingleStep(0.1)
+        self.header_distance_spin.setDecimals(2)
+        self.header_distance_spin.setSuffix(' cm')
+        self.header_distance_spin.setMinimumHeight(32)
+        margin_grid.addWidget(BodyLabel('页眉距离'), 2, 0)
+        margin_grid.addWidget(self.header_distance_spin, 2, 1)
+
+        self.footer_distance_spin = DoubleSpinBox()
+        self.footer_distance_spin.setRange(0.0, 10.0)
+        self.footer_distance_spin.setValue(1.75)
+        self.footer_distance_spin.setSingleStep(0.1)
+        self.footer_distance_spin.setDecimals(2)
+        self.footer_distance_spin.setSuffix(' cm')
+        self.footer_distance_spin.setMinimumHeight(32)
+        margin_grid.addWidget(BodyLabel('页脚距离'), 2, 2)
+        margin_grid.addWidget(self.footer_distance_spin, 2, 3)
+
+        # 分隔线
+        style_layout.addSpacing(8)
+        style_layout.addWidget(HorizontalSeparator())
+        style_layout.addSpacing(8)
+
+        # === 页码格式 ===
+        page_section = BodyLabel('页码格式')
+        page_section.setStyleSheet('font-size: 12px; font-weight: 600; color: #374151;')
+        style_layout.addWidget(page_section)
+        
+        page_grid = QGridLayout()
+        page_grid.setHorizontalSpacing(12)
+        page_grid.setVerticalSpacing(10)
+        page_grid.setColumnStretch(1, 1)
+        page_grid.setColumnMinimumWidth(0, 120)
+        style_layout.addLayout(page_grid)
 
         # 页码格式
         self.page_number_combo = ComboBox()
@@ -311,16 +434,18 @@ class GeneratorWindow(QMainWindow):
         ])
         self.page_number_combo.setMinimumHeight(32)
         self.page_number_combo.currentTextChanged.connect(self._on_page_number_format_changed)
-        style_grid.addWidget(BodyLabel('页码格式'), 7, 0)
-        style_grid.addWidget(self.page_number_combo, 7, 1)
+        page_grid.addWidget(BodyLabel('格式'), 0, 0)
+        page_grid.addWidget(self.page_number_combo, 0, 1)
 
         # 自定义页码格式
         self.custom_page_number_edit = LineEdit()
         self.custom_page_number_edit.setPlaceholderText('使用 {page} 和 {total} 作为占位符')
         self.custom_page_number_edit.setMinimumHeight(32)
         self.custom_page_number_edit.setVisible(False)
-        style_grid.addWidget(self.custom_page_number_edit, 8, 1)
+        page_grid.addWidget(self.custom_page_number_edit, 1, 1)
 
+        # 恢复默认按钮
+        style_layout.addSpacing(8)
         style_btn_row = QWidget()
         style_btn_layout = QHBoxLayout(style_btn_row)
         style_btn_layout.setContentsMargins(0, 0, 0, 0)
@@ -531,7 +656,7 @@ class GeneratorWindow(QMainWindow):
             'indirs': indirs,
             'exts': exts,
             'comment_chars': comment_chars,
-            'font_name': self.font_name_edit.currentText().strip() or '宋体',
+            'font_name': self.font_name_edit.currentText().strip() or 'Consolas',
             'font_size': self.font_size_spin.value(),
             'space_before': self.space_before_spin.value(),
             'space_after': self.space_after_spin.value(),
@@ -544,6 +669,12 @@ class GeneratorWindow(QMainWindow):
             'encoding': encoding,
             'header_font': self.header_font_combo.currentText().strip() or '宋体',
             'header_font_size': self.header_font_size_spin.value(),
+            'top_margin': self.top_margin_spin.value(),
+            'bottom_margin': self.bottom_margin_spin.value(),
+            'left_margin': self.left_margin_spin.value(),
+            'right_margin': self.right_margin_spin.value(),
+            'header_distance': self.header_distance_spin.value(),
+            'footer_distance': self.footer_distance_spin.value(),
             'page_number_format': page_number_format,
             'selected_files': self.selected_files if self.selected_files else None,
             'pages_60_mode': self.pages_60_check.isChecked()
@@ -743,10 +874,13 @@ class GeneratorWindow(QMainWindow):
             return
         
         # generate 模式
-        stats = result.get('stats')
-        if stats:
-            self.last_stats = stats
-        total_lines = result.get('total_lines', 0)
+        total_lines_info = result.get('total_lines', {})
+        if isinstance(total_lines_info, dict):
+            self.last_stats = total_lines_info
+            total_lines = total_lines_info.get('total_lines', 0)
+        else:
+            total_lines = total_lines_info
+        
         self.status_label.setText('生成完成，共写入 {} 个文件，{} 行代码'.format(
             result.get('file_count', 0), total_lines))
         self.summary_title.setText('生成完成')
@@ -767,13 +901,19 @@ class GeneratorWindow(QMainWindow):
         self.open_output_btn.setEnabled(enabled)
 
     def reset_style_defaults(self):
-        self.font_name_edit.setCurrentText('宋体')
+        self.font_name_edit.setCurrentText('Consolas')
         self.font_size_spin.setValue(10.5)
         self.header_font_combo.setCurrentText('宋体')
         self.header_font_size_spin.setValue(10.5)
         self.space_before_spin.setValue(0.0)
         self.space_after_spin.setValue(2.3)
         self.line_spacing_spin.setValue(10.5)
+        self.top_margin_spin.setValue(2.5)
+        self.bottom_margin_spin.setValue(2.5)
+        self.left_margin_spin.setValue(2.5)
+        self.right_margin_spin.setValue(2.5)
+        self.header_distance_spin.setValue(1.5)
+        self.footer_distance_spin.setValue(1.75)
         self.page_number_combo.setCurrentText('第 {page} 页 共 {total} 页')
 
     def _notify(self, level, title, content):
