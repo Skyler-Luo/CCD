@@ -13,7 +13,7 @@ from PyQt5.QtCore import QEvent, Qt, QTimer, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QFileDialog, QScrollArea, QMainWindow, QDialog
+    QFileDialog, QScrollArea, QMainWindow, QDialog, QMessageBox
 )
 from qfluentwidgets import (
     PrimaryPushButton, PushButton, LineEdit, TextEdit,
@@ -892,6 +892,8 @@ class GeneratorWindow(QMainWindow):
         self.status_label.setText('失败：{}'.format(message))
         self.summary_title.setText('任务失败')
         self._notify('error', '生成失败', message)
+        # 显示错误弹窗
+        QMessageBox.critical(self, '操作失败', f'任务执行失败:\n\n{message}')
 
     def set_buttons_enabled(self, enabled):
         self.scan_btn.setEnabled(enabled)

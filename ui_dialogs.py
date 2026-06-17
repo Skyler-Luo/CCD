@@ -683,6 +683,8 @@ class LogViewDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('查看日志')
+        # 去掉右上角的问号
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.resize(900, 600)
         self.setAutoFillBackground(True)
         palette = self.palette()
