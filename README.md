@@ -1,8 +1,4 @@
-# CCD - 软著源代码文档生成器
-
-> Code Copyright Document Generator - 一键生成符合软著要求的源代码文档
-
-![界面示例图](img.png)
+# Code Copyright Document Generator - 一键生成符合软著要求的源代码文档
 
 ## 📖 简介
 
@@ -19,6 +15,8 @@ CCD 是一个专为软件著作权申请设计的源代码文档生成工具。�
 - 🎨 **文件管理** - 双栏设计，支持文件选择、排序、预览
 - 📝 **完整日志** - 详细的操作日志，支持实时查看和问题排查
 - 🌐 **多平台支持** - Windows、macOS、Linux 全平台支持（60页模式仅Windows）
+
+![界面示例图](img.png)
 
 ## 📦 安装
 
