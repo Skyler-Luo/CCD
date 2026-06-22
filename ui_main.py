@@ -752,12 +752,25 @@ class GeneratorWindow(QMainWindow):
             self._notify('warning', '无可选文件', '请先扫描文件以获取可选文件列表')
             return
         
-        dialog = FileSelectDialog(self.available_files, self.selected_files, self)
-        # 传递编码设置到对话框
+        # 获取当前配置
         encoding = self.encoding_combo.currentText().strip() or 'utf-8'
         if encoding == '自动':
             encoding = 'auto'
-        dialog.encoding = encoding
+        
+        comment_chars = normalize_items(self.comment_chars_edit.text())
+        skip_blank_lines = self.skip_blank_check.isChecked()
+        skip_comment_lines = self.skip_comment_check.isChecked()
+        
+        # 创建对话框并传递过滤配置
+        dialog = FileSelectDialog(
+            self.available_files, 
+            self.selected_files,
+            skip_blank_lines=skip_blank_lines,
+            skip_comment_lines=skip_comment_lines,
+            comment_chars=comment_chars,
+            encoding=encoding,
+            parent=self
+        )
         
         if dialog.exec_() == QDialog.Accepted:
             self.selected_files = dialog.get_selected()
@@ -926,8 +939,14 @@ class GeneratorWindow(QMainWindow):
             'error': InfoBar.error,
             'warning': InfoBar.warning
         }.get(level, InfoBar.info)
-        notify_func(title=title, content=content, duration=duration, 
-                   position=InfoBarPosition.TOP, parent=self)
+        notify_func(
+            title=title, 
+            content=content, 
+            duration=duration,
+            isClosable=True,
+            position=InfoBarPosition.TOP, 
+            parent=self
+        )
 
     def _validate_inputs(self, config, mode):
         if not config['indirs']:

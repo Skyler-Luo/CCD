@@ -289,7 +289,7 @@ class CommentPrefixDialog(QDialog):
 
 class FileSelectDialog(QDialog):
     """文件多选对话框，左右两栏布局，支持多选、顺序调整和文件预览"""
-    def __init__(self, files, selected_files, parent=None):
+    def __init__(self, files, selected_files, skip_blank_lines=True, skip_comment_lines=True, comment_chars=None, encoding='auto', parent=None):
         super().__init__(parent)
         self.setWindowTitle('选择源文件并排序')
         self.resize(900, 700)
@@ -304,7 +304,11 @@ class FileSelectDialog(QDialog):
         main_layout.setContentsMargins(16, 16, 16, 16)
         main_layout.setSpacing(12)
         
-        self.encoding = 'auto'  # 编码设置
+        # 保存过滤配置
+        self.skip_blank_lines = skip_blank_lines
+        self.skip_comment_lines = skip_comment_lines
+        self.comment_chars = comment_chars if comment_chars else []
+        self.encoding = encoding
 
         # 标题和提示
         header = BodyLabel('选择源文件并排序')
@@ -329,6 +333,25 @@ class FileSelectDialog(QDialog):
         left_header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
         left_layout.addWidget(left_header)
         
+        # 排序选项行
+        sort_row = QWidget()
+        sort_layout = QHBoxLayout(sort_row)
+        sort_layout.setContentsMargins(0, 0, 0, 0)
+        sort_layout.setSpacing(8)
+        
+        sort_label = BodyLabel('排序:')
+        sort_label.setStyleSheet('font-size: 11px; color: #6b7280;')
+        sort_layout.addWidget(sort_label)
+        
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(['默认顺序', '按文件名', '按代码行数↓', '按代码行数↑'])
+        self.sort_combo.setFixedWidth(120)
+        self.sort_combo.currentTextChanged.connect(self._sort_available_files)
+        sort_layout.addWidget(self.sort_combo)
+        sort_layout.addStretch(1)
+        
+        left_layout.addWidget(sort_row)
+        
         self.search_box = LineEdit()
         self.search_box.setPlaceholderText('搜索文件...')
         self.search_box.textChanged.connect(self._filter_available_files)
@@ -337,6 +360,8 @@ class FileSelectDialog(QDialog):
         self.available_list = QListWidget()
         self.available_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.available_list.setAlternatingRowColors(True)
+        # 禁用自动滚动到选中项
+        self.available_list.setAutoScroll(False)
         left_layout.addWidget(self.available_list, 1)
         
         self.available_count_label = BodyLabel('')
@@ -388,6 +413,8 @@ class FileSelectDialog(QDialog):
         self.selected_list = QListWidget()
         self.selected_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.selected_list.setAlternatingRowColors(True)
+        # 禁用自动滚动到选中项
+        self.selected_list.setAutoScroll(False)
         right_layout.addWidget(self.selected_list, 1)
         
         # 排序按钮
@@ -466,6 +493,7 @@ class FileSelectDialog(QDialog):
         # 初始化数据
         self.all_files = files
         self._current_preview_file = None
+        self._file_cache = {}  # 缓存文件信息（行数、大小等）
         self._init_file_lists(files, selected_files)
         
         # 连接信号
@@ -485,6 +513,83 @@ class FileSelectDialog(QDialog):
         
         self._update_counts()
     
+    def _get_file_info(self, file_path):
+        """获取文件信息（缓存）"""
+        if file_path in self._file_cache:
+            return self._file_cache[file_path]
+        
+        info = {
+            'path': file_path,
+            'name': os.path.basename(file_path),
+            'size': 0,
+            'lines': 0,
+            'filtered_lines': 0  # 过滤后的行数
+        }
+        
+        try:
+            if os.path.exists(file_path):
+                info['size'] = os.path.getsize(file_path)
+                
+                # 读取内容并计算行数
+                try:
+                    content = decode_content(file_path, self.encoding)
+                    info['lines'] = len(content.splitlines())
+                    
+                    # 计算过滤后的行数
+                    language = get_language_by_extension(file_path)
+                    from code_processor import filter_lines
+                    filtered = filter_lines(
+                        content, 
+                        language, 
+                        self.skip_blank_lines, 
+                        self.skip_comment_lines, 
+                        self.comment_chars
+                    )
+                    info['filtered_lines'] = len(filtered)
+                except:
+                    info['lines'] = 0
+                    info['filtered_lines'] = 0
+        except:
+            pass
+        
+        self._file_cache[file_path] = info
+        return info
+    
+    def _sort_available_files(self):
+        """根据选择的排序方式对可选文件列表进行排序"""
+        sort_mode = self.sort_combo.currentText()
+        
+        # 收集所有可见的文件项
+        items = []
+        for i in range(self.available_list.count()):
+            item = self.available_list.item(i)
+            if not item.isHidden():
+                items.append(item.text())
+        
+        if not items:
+            return
+        
+        # 根据排序模式排序
+        if sort_mode == '按文件名':
+            items.sort(key=lambda x: os.path.basename(x).lower())
+        elif sort_mode == '按代码行数↓':
+            # 降序：行数多的在前
+            items.sort(key=lambda x: self._get_file_info(x)['lines'], reverse=True)
+        elif sort_mode == '按代码行数↑':
+            # 升序：行数少的在前
+            items.sort(key=lambda x: self._get_file_info(x)['lines'])
+        # '默认顺序' 不排序，保持原顺序
+        
+        # 清空列表并重新添加排序后的项
+        self.available_list.clear()
+        for file_path in items:
+            self.available_list.addItem(file_path)
+        
+        # 应用当前搜索过滤
+        search_text = self.search_box.text()
+        if search_text:
+            self._filter_available_files(search_text)
+    
     def _init_file_lists(self, files, selected_files):
         """初始化左右两栏的文件列表"""
         selected_set = set(selected_files) if selected_files else set()
@@ -496,15 +601,30 @@ class FileSelectDialog(QDialog):
         for file in files:
             if file not in selected_set:
                 self.available_list.addItem(file)
+        
+        # 预加载文件信息（在后台线程中可以优化，这里简单处理）
+        # 为了不阻塞UI，只预加载前100个文件的信息
+        for i, file in enumerate(files):
+            if i >= 100:
+                break
+            self._get_file_info(file)
     
     def _add_selected(self):
         """将左栏选中的文件添加到右栏"""
+        # 保存左栏滚动位置
+        left_scroll_pos = self.available_list.verticalScrollBar().value()
+        
         selected_items = self.available_list.selectedItems()
         for item in selected_items:
             row = self.available_list.row(item)
             self.available_list.takeItem(row)
             self.selected_list.addItem(item.text())
+        
         self._update_counts()
+        
+        # 恢复左栏滚动位置(调整到合适的范围)
+        max_scroll = self.available_list.verticalScrollBar().maximum()
+        self.available_list.verticalScrollBar().setValue(min(left_scroll_pos, max_scroll))
     
     def _add_all(self):
         """将所有可见的可选文件添加到右栏"""
@@ -520,23 +640,55 @@ class FileSelectDialog(QDialog):
         
         for file_path in items_to_add:
             self.selected_list.addItem(file_path)
+        
         self._update_counts()
+        
+        # 重置左栏滚动位置到顶部
+        self.available_list.verticalScrollBar().setValue(0)
     
     def _remove_selected(self):
         """将右栏选中的文件移回左栏"""
+        # 保存右栏滚动位置
+        right_scroll_pos = self.selected_list.verticalScrollBar().value()
+        
         selected_items = self.selected_list.selectedItems()
+        items_to_add = [item.text() for item in selected_items]
+        
         for item in selected_items:
             row = self.selected_list.row(item)
             self.selected_list.takeItem(row)
-            self.available_list.addItem(item.text())
+        
+        # 添加到左栏并重新排序
+        for file_path in items_to_add:
+            self.available_list.addItem(file_path)
+        
+        # 应用当前排序
+        self._sort_available_files()
+        
         self._update_counts()
+        
+        # 恢复右栏滚动位置(调整到合适的范围)
+        max_scroll = self.selected_list.verticalScrollBar().maximum()
+        self.selected_list.verticalScrollBar().setValue(min(right_scroll_pos, max_scroll))
     
     def _remove_all(self):
         """将所有已选文件移回左栏"""
+        items_to_add = []
         while self.selected_list.count() > 0:
             item = self.selected_list.takeItem(0)
-            self.available_list.addItem(item.text())
+            items_to_add.append(item.text())
+        
+        # 添加到左栏
+        for file_path in items_to_add:
+            self.available_list.addItem(file_path)
+        
+        # 应用当前排序
+        self._sort_available_files()
+        
         self._update_counts()
+        
+        # 重置右栏滚动位置到顶部
+        self.selected_list.verticalScrollBar().setValue(0)
     
     def _move_to_top(self):
         """将选中的项移到顶部"""
@@ -549,30 +701,47 @@ class FileSelectDialog(QDialog):
         for i, text in enumerate(items_text):
             self.selected_list.insertItem(i, text)
             self.selected_list.item(i).setSelected(True)
+        
+        # 滚动到顶部
+        self.selected_list.scrollToTop()
     
     def _move_up(self):
         """将选中的项上移一位"""
         selected_items = self.selected_list.selectedItems()
         if not selected_items:
             return
+        
+        # 保存滚动位置
+        scroll_pos = self.selected_list.verticalScrollBar().value()
+        
         rows = sorted([self.selected_list.row(item) for item in selected_items])
         for row in rows:
             if row > 0:
                 item = self.selected_list.takeItem(row)
                 self.selected_list.insertItem(row - 1, item)
                 item.setSelected(True)
+        
+        # 恢复滚动位置
+        self.selected_list.verticalScrollBar().setValue(scroll_pos)
     
     def _move_down(self):
         """将选中的项下移一位"""
         selected_items = self.selected_list.selectedItems()
         if not selected_items:
             return
+        
+        # 保存滚动位置
+        scroll_pos = self.selected_list.verticalScrollBar().value()
+        
         rows = sorted([self.selected_list.row(item) for item in selected_items], reverse=True)
         for row in rows:
             if row < self.selected_list.count() - 1:
                 item = self.selected_list.takeItem(row)
                 self.selected_list.insertItem(row + 1, item)
                 item.setSelected(True)
+        
+        # 恢复滚动位置
+        self.selected_list.verticalScrollBar().setValue(scroll_pos)
     
     def _move_to_bottom(self):
         """将选中的项移到底部"""
@@ -585,27 +754,60 @@ class FileSelectDialog(QDialog):
         for text in items_text:
             self.selected_list.addItem(text)
             self.selected_list.item(self.selected_list.count() - 1).setSelected(True)
+        
+        # 滚动到底部
+        self.selected_list.scrollToBottom()
     
     def _filter_available_files(self, text):
         """根据搜索文本过滤左栏文件列表"""
+        # 保存滚动位置
+        scroll_pos = self.available_list.verticalScrollBar().value()
+        
         for i in range(self.available_list.count()):
             item = self.available_list.item(i)
             item.setHidden(text.lower() not in item.text().lower())
+        
         self._update_counts()
+        
+        # 如果有过滤文本,滚动到顶部;否则恢复滚动位置
+        if text:
+            self.available_list.verticalScrollBar().setValue(0)
+        else:
+            max_scroll = self.available_list.verticalScrollBar().maximum()
+            self.available_list.verticalScrollBar().setValue(min(scroll_pos, max_scroll))
     
     def _on_available_double_click(self, item):
         """双击左栏文件，添加到右栏"""
+        # 保存滚动位置
+        scroll_pos = self.available_list.verticalScrollBar().value()
+        
         row = self.available_list.row(item)
         self.available_list.takeItem(row)
         self.selected_list.addItem(item.text())
         self._update_counts()
+        
+        # 恢复滚动位置
+        max_scroll = self.available_list.verticalScrollBar().maximum()
+        self.available_list.verticalScrollBar().setValue(min(scroll_pos, max_scroll))
     
     def _on_selected_double_click(self, item):
         """双击右栏文件，移回左栏"""
+        # 保存滚动位置
+        scroll_pos = self.selected_list.verticalScrollBar().value()
+        
         row = self.selected_list.row(item)
+        file_path = item.text()
         self.selected_list.takeItem(row)
-        self.available_list.addItem(item.text())
+        
+        # 添加到左栏并重新排序
+        self.available_list.addItem(file_path)
+        self._sort_available_files()
+        
         self._update_counts()
+        
+        # 恢复滚动位置
+        max_scroll = self.selected_list.verticalScrollBar().maximum()
+        self.selected_list.verticalScrollBar().setValue(min(scroll_pos, max_scroll))
     
     def _on_file_clicked(self, item):
         """单击文件时显示预览"""
@@ -627,14 +829,16 @@ class FileSelectDialog(QDialog):
             return
         
         try:
-            file_size = os.path.getsize(file_path)
+            # 获取文件信息
+            file_info = self._get_file_info(file_path)
+            file_size = file_info['size']
+            total_lines = file_info['lines']
             size_str = format_file_size(file_size)
             
             max_lines = int(self.preview_lines_combo.currentText())
             content = decode_content(file_path, self.encoding)
             
             all_lines = content.splitlines()
-            total_lines = len(all_lines)
             
             preview_lines = all_lines[:max_lines]
             preview_content = '\n'.join(preview_lines)
@@ -649,7 +853,9 @@ class FileSelectDialog(QDialog):
             file_name = os.path.basename(file_path)
             language = get_language_by_extension(file_path)
             lang_str = ' | 语言: {}'.format(language) if language else ''
-            self.preview_info_label.setText('文件: {} | 大小: {} | 总行数: {}{}'.format(
+            
+            # 显示文件名、大小、行数、语言
+            self.preview_info_label.setText('文件: {} | 大小: {} | 行数: {}{}'.format(
                 file_name, size_str, total_lines, lang_str
             ))
             
@@ -664,7 +870,25 @@ class FileSelectDialog(QDialog):
         self.available_count_label.setText('可选: {} 项'.format(available_visible))
         
         selected_count = self.selected_list.count()
-        self.selected_count_label.setText('已选: {} 项'.format(selected_count))
+        
+        # 计算已选文件的总行数和过滤后行数
+        total_lines = 0
+        total_filtered_lines = 0
+        for i in range(selected_count):
+            file_path = self.selected_list.item(i).text()
+            info = self._get_file_info(file_path)
+            total_lines += info['lines']
+            total_filtered_lines += info['filtered_lines']
+        
+        if total_lines > 0:
+            # 显示：已选文件数 | 总行数 | 过滤后行数
+            self.selected_count_label.setText(
+                '已选: {} 项 | 总计: {} 行 | 过滤后: {} 行'.format(
+                    selected_count, total_lines, total_filtered_lines
+                )
+            )
+        else:
+            self.selected_count_label.setText('已选: {} 项'.format(selected_count))
     
     def get_selected(self):
         """返回选中的文件列表，按照右栏顺序"""

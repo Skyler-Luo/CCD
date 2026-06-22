@@ -115,23 +115,28 @@ def extract_60_pages(input_docx, output_docx):
         # 复制页眉页脚设置 - 简单复制，稍后统一处理
         logger.info("复制页眉页脚...")
         for i in range(1, min(doc.Sections.Count, temp_doc.Sections.Count) + 1):
-            # 复制页眉
-            source_header = doc.Sections(i).Headers(wdHeaderFooterPrimary)
-            target_header = temp_doc.Sections(i).Headers(wdHeaderFooterPrimary)
-            
-            target_header.Range.Delete()
-            if source_header.Range.Text.strip():
-                source_header.Range.Copy()
-                target_header.Range.Paste()
-            
-            # 复制页脚
-            source_footer = doc.Sections(i).Footers(wdHeaderFooterPrimary)
-            target_footer = temp_doc.Sections(i).Footers(wdHeaderFooterPrimary)
-            
-            target_footer.Range.Delete()
-            if source_footer.Range.Text.strip():
-                source_footer.Range.Copy()
-                target_footer.Range.Paste()
+            try:
+                # 复制页眉
+                source_header = doc.Sections(i).Headers(wdHeaderFooterPrimary)
+                target_header = temp_doc.Sections(i).Headers(wdHeaderFooterPrimary)
+                
+                if source_header.Range.Text.strip():
+                    source_header.Range.Copy()
+                    target_header.Range.Select()
+                    word.Selection.Paste()
+                
+                # 复制页脚
+                source_footer = doc.Sections(i).Footers(wdHeaderFooterPrimary)
+                target_footer = temp_doc.Sections(i).Footers(wdHeaderFooterPrimary)
+                
+                if source_footer.Range.Text.strip():
+                    source_footer.Range.Copy()
+                    target_footer.Range.Select()
+                    word.Selection.Paste()
+            except Exception as e:
+                logger.warning(f"复制第 {i} 节页眉页脚时出错: {str(e)}")
+                # 继续处理其他节
+                continue
         
         # 第一步：复制前30页 - 一次性复制，但使用精确的页面范围
         logger.info("复制前30页...")
