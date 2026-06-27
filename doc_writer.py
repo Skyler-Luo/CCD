@@ -7,6 +7,7 @@ from code_processor import (
     DEFAULT_COMMENT_CHARS, decode_content,
     get_language_by_extension, filter_lines
 )
+from docx.oxml.ns import qn
 
 
 def load_docx_dependencies():
@@ -191,6 +192,7 @@ class CodeWriter:
                 run = footer_para.add_run(parts[0])
                 run.font.name = self.header_font
                 run.font.size = self._Pt(self.header_font_size)
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
             
             # 添加当前页码域
             fld_simple = OxmlElement('w:fldSimple')
@@ -219,6 +221,7 @@ class CodeWriter:
                     run = footer_para.add_run(mid_parts[0])
                     run.font.name = self.header_font
                     run.font.size = self._Pt(self.header_font_size)
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
                 
                 # 添加总页数域
                 fld_simple2 = OxmlElement('w:fldSimple')
@@ -245,11 +248,13 @@ class CodeWriter:
                     run = footer_para.add_run(mid_parts[1])
                     run.font.name = self.header_font
                     run.font.size = self._Pt(self.header_font_size)
+                    run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
         else:
             # 简单文本格式
             run = footer_para.add_run(self.page_number_format)
             run.font.name = self.header_font
             run.font.size = self._Pt(self.header_font_size)
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
         
         return self
 
@@ -271,6 +276,8 @@ class CodeWriter:
             run = paragraph.add_run(line.rstrip())
             run.font.name = self.font_name
             run.font.size = self._Pt(self.font_size)
+            # 同时设置东亚字体，避免中文字符回退到默认字体导致混排
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), self.font_name)
             self.total_lines += 1
         return self
     

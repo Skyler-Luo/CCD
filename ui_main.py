@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 UI主窗口模块
 包含主界面窗口和启动函数
@@ -479,6 +479,11 @@ class GeneratorWindow(QMainWindow):
         self.pages_60_check.setChecked(False)
         action_row_layout.addWidget(self.pages_60_check)
         
+        # 导出PDF开关
+        self.export_pdf_check = CheckBox('同时导出 PDF')
+        self.export_pdf_check.setChecked(False)
+        action_row_layout.addWidget(self.export_pdf_check)
+        
         self.generate_btn = PrimaryPushButton('生成文档')
         self.scan_btn = PushButton('扫描文件数')
         self.select_files_btn = PushButton('选择文件')
@@ -677,7 +682,8 @@ class GeneratorWindow(QMainWindow):
             'footer_distance': self.footer_distance_spin.value(),
             'page_number_format': page_number_format,
             'selected_files': self.selected_files if self.selected_files else None,
-            'pages_60_mode': self.pages_60_check.isChecked()
+            'pages_60_mode': self.pages_60_check.isChecked(),
+            'export_pdf': self.export_pdf_check.isChecked()
         }
 
     def schedule_extension_scan(self):
@@ -897,7 +903,17 @@ class GeneratorWindow(QMainWindow):
         self.status_label.setText('生成完成，共写入 {} 个文件，{} 行代码'.format(
             result.get('file_count', 0), total_lines))
         self.summary_title.setText('生成完成')
-        self._notify('success', '生成完成', '输出文件：{}'.format(result.get('outfile', '')))
+        
+        # 检查 PDF 导出结果
+        pdf_path = result.get('pdf_path')
+        pdf_warning = result.get('pdf_warning')
+        if pdf_path:
+            self._notify('success', '生成完成', '输出文件：{}\nPDF：{}'.format(
+                result.get('outfile', ''), pdf_path))
+        elif pdf_warning:
+            self._notify('warning', '文档已生成，PDF导出失败', pdf_warning)
+        else:
+            self._notify('success', '生成完成', '输出文件：{}'.format(result.get('outfile', '')))
         self._update_open_output_enabled()
 
     def handle_failed(self, message):

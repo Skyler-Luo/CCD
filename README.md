@@ -1,6 +1,6 @@
 # Code-Copyright-Docgen: 一键生成符合软著要求的源代码文档
 
-CCD 是一个专为软件著作权申请设计的源代码文档生成工具。它能够自动扫描项目源码，按照软著规范生成符合格式要求的 Word 文档（.docx），大幅简化软著材料准备工作。
+CCD 是一个专为软件著作权申请设计的源代码文档生成工具。它能够自动扫描项目源码，按照软著规范生成符合格式要求的 Word 文档（.docx），并可同时导出 PDF，大幅简化软著材料准备工作。
 
 ## ✨ 核心特性
 
@@ -9,10 +9,11 @@ CCD 是一个专为软件著作权申请设计的源代码文档生成工具。�
 - 📦 **智能代码识别** - 支持 30+ 种编程语言，自动识别注释和空行
 - 🔧 **灵活配置** - 支持自定义字体、排版、页码格式、页边距等
 - ⚡ **精确60页模式** - 基于 Word COM 自动化，精确提取前30页+后30页
+- 📄 **PDF 导出** - 一键将生成的 docx 同时导出为 PDF
 - 📊 **代码统计** - 实时统计代码行数、文件数、语言分布
 - 🎨 **文件管理** - 双栏设计，支持文件选择、排序、预览
 - 📝 **完整日志** - 详细的操作日志，支持实时查看和问题排查
-- 🌐 **多平台支持** - Windows、macOS、Linux 全平台支持（60页模式仅Windows）
+- 🌐 **多平台支持** - Windows、macOS、Linux 全平台支持（60页模式与PDF导出仅Windows）
 
 ![界面示例图](img.png)
 
@@ -22,7 +23,7 @@ CCD 是一个专为软件著作权申请设计的源代码文档生成工具。�
 
 - **Python 3.6+**
 - **操作系统**：Windows / macOS / Linux
-- **60页模式额外要求**（可选）：
+- **60页模式 / PDF导出 额外要求**（可选）：
   - Windows 系统
   - Microsoft Word
   - pywin32 库
@@ -52,9 +53,9 @@ qfluentwidgets>=1.1.0  # 现代化UI组件库
 click>=8.0.0           # 命令行接口
 ```
 
-**可选依赖（60页模式）：**
+**可选依赖（60页模式 / PDF导出）：**
 ```
-pywin32>=300           # Windows COM 自动化（仅Windows + 60页模式需要）
+pywin32>=300           # Windows COM 自动化（仅Windows，60页模式和PDF导出需要）
 ```
 
 ## 🚀 快速开始
@@ -71,6 +72,9 @@ python cli.py --gui
 # 基础用法
 python cli.py -i ./src -e py -o code.docx
 
+# 同时导出 PDF
+python cli.py -i ./src -e py -o code.docx --pdf
+
 # 完整示例
 python cli.py \
   --title "我的软件V1.0" \
@@ -82,7 +86,8 @@ python cli.py \
   --exclude ./node_modules \
   --outfile output.docx \
   --font-name Consolas \
-  --font-size 10.5
+  --font-size 10.5 \
+  --pdf
 ```
 
 ## 📘 使用指南
@@ -126,10 +131,11 @@ python cli.py \
    - 选择字体（推荐 Consolas 等宽字体）
    - 选择页码格式
    - 如果代码 ≥ 3000行，勾选"60页模式"
+   - 如需 PDF，勾选"同时导出 PDF"
 
 8. **生成文档**
    - 点击"生成文档"
-   - 等待生成完成
+   - 等待生成完成（勾选 PDF 时会在 docx 生成后自动转换）
    - 点击"打开输出目录"查看结果
 
 ### 命令行参数说明
@@ -155,6 +161,7 @@ python cli.py --help
 | `--encoding` | 文件编码 | `--encoding utf-8` |
 | `--keep-blank-lines` | 保留空行 | - |
 | `--keep-comment-lines` | 保留注释 | - |
+| `--pdf` | 同时导出 PDF 文件 | - |
 | `--gui` | 启动图形界面 | - |
 | `-v, --verbose` | 调试信息 | - |
 
@@ -202,9 +209,27 @@ python cli.py --help
 - 生成的文档严格保证60页，且最后一页为代码结束
 - 如果 Word 不可用，会自动回退到普通模式
 
+### PDF 导出
+
+生成 docx 文档后，可同时导出为高保真 PDF 文件。
+
+**特点：**
+- 📄 使用 Word COM 的 `ExportAsFixedFormat` 导出，页眉、页脚、页码、字体完美保留
+- 📂 PDF 自动保存在与 docx 相同目录，文件名相同仅后缀不同
+- ⚠️ 导出失败不会影响 docx 的正常生成
+
+**启用方式：**
+- **GUI**：勾选"同时导出 PDF"
+- **CLI**：添加 `--pdf` 参数
+
+**技术要求：**
+- 仅支持 Windows 系统
+- 需要安装 Microsoft Word
+- 需要安装 `pywin32`
+
 ### Word COM 自动化支持
 
-CCD 使用先进的 Word COM 自动化技术实现精确的60页提取：
+CCD 使用 Word COM 自动化技术实现精确的60页提取和 PDF 导出：
 
 **功能特性：**
 - 🎯 **精确页面定位**：使用 `GoTo` 方法精确定位每一页
@@ -212,12 +237,14 @@ CCD 使用先进的 Word COM 自动化技术实现精确的60页提取：
 - 🔧 **自动页数调整**：智能补偿和删除，确保准确60页
 - 🧹 **文档清理**：自动清理多余段落、空白页、分页符
 - ✅ **多次验证**：保存后重新打开验证，确保页数准确
+- 📄 **PDF 导出**：使用 `ExportAsFixedFormat` 高保真转换
 
 **实现细节：**
 - 前30页：使用 `Range(0, page31_start)` 一次性提取
 - 后30+页：提取最后35页作为缓冲，确保内容充足
 - 自动调整：从中间删除或补充页面，保持前后结构完整
 - 验证机制：生成后重新打开文档验证页数，不符合则自动调整
+- PDF 导出：子线程 COM 初始化 + 独立 Word 进程，确保稳定性
 
 ### 文件选择与预览
 
@@ -277,7 +304,7 @@ CCD/
 ├── code_processor.py      # 代码处理工具（语言识别、注释过滤）
 ├── doc_writer.py          # 文档写入（CodeWriter类，处理格式）
 ├── doc_generator.py       # 文档生成主流程
-├── word_com_helper.py     # Word COM自动化（60页模式核心）
+├── word_com_helper.py     # Word COM自动化（60页模式 + PDF导出）
 ├── ui_main.py             # 主窗口界面（Fluent Design）
 ├── ui_dialogs.py          # 对话框组件（文件选择、日志查看）
 ├── ui_tasks.py            # 后台任务（Worker线程）
@@ -294,6 +321,7 @@ CCD/
 **word_com_helper.py** - Word COM 自动化模块
 - `check_word_available()` - 检查 Word 是否可用
 - `extract_60_pages()` - 精确提取60页的核心算法
+- `convert_docx_to_pdf()` - 高保真 PDF 导出
 - `diagnose_document_pages()` - 文档页数诊断工具
 
 **ui_dialogs.py** - 对话框组件

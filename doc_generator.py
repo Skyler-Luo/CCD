@@ -32,7 +32,8 @@ def generate_code_doc(
         left_margin=2.5, right_margin=2.5,
         header_distance=1.5, footer_distance=1.75,
         page_number_format='第 {page} 页 共 {total} 页',
-        selected_files=None, pages_60_mode=False
+        selected_files=None, pages_60_mode=False,
+        export_pdf=False
 ):
     """
     生成 docx 源代码文档
@@ -61,9 +62,10 @@ def generate_code_doc(
         page_number_format: 页码格式
         selected_files: 用户选择的文件列表（如果为 None 则使用所有文件）
         pages_60_mode: 是否启用60页模式（前30页+后30页）
+        export_pdf: 是否同时导出 PDF 文件
         
     Returns:
-        dict：包含 file_count、outfile、total_lines
+        dict：包含 file_count、outfile、total_lines，若导出 PDF 则含 pdf_path
     """
     if not indirs:
         indirs = DEFAULT_INDIRS
@@ -153,20 +155,23 @@ def generate_code_doc(
                 shutil.move(temp_path, outfile)
                 temp_path = None
                 
-                return {
+                result = {
                     'file_count': len(files),
                     'outfile': outfile,
                     'total_lines': total_lines_info,
                     'pages_60_mode': False,
                     'warning': f'60页模式失败: {error_msg}'
                 }
+                if export_pdf:
+                    result = _try_export_pdf(outfile, result)
+                return result
             
             # 执行提取
             result = extract_60_pages(temp_path, outfile)
             
             if result['success']:
                 logger.info(f"成功生成60页文档！原文档{result['total_pages']}页，新文档{result['output_pages']}页")
-                return {
+                gen_result = {
                     'file_count': len(files),
                     'outfile': outfile,
                     'total_lines': total_lines_info,
@@ -174,6 +179,9 @@ def generate_code_doc(
                     'original_pages': result['total_pages'],
                     'output_pages': result['output_pages']
                 }
+                if export_pdf:
+                    gen_result = _try_export_pdf(outfile, gen_result)
+                return gen_result
             else:
                 logger.error(f"60页模式失败: {result['message']}")
                 # 回退：保存完整文档
@@ -181,13 +189,16 @@ def generate_code_doc(
                 shutil.move(temp_path, outfile)
                 temp_path = None
                 
-                return {
+                fallback_result = {
                     'file_count': len(files),
                     'outfile': outfile,
                     'total_lines': total_lines_info,
                     'pages_60_mode': False,
                     'error': result['message']
                 }
+                if export_pdf:
+                    fallback_result = _try_export_pdf(outfile, fallback_result)
+                return fallback_result
                 
         finally:
             # 清理临时文件
@@ -203,8 +214,41 @@ def generate_code_doc(
             writer.write_file(file)
         writer.save(outfile)
     
-    return {
+    result = {
         'file_count': len(files),
         'outfile': outfile,
         'total_lines': total_lines_info
     }
+    if export_pdf:
+        result = _try_export_pdf(outfile, result)
+    return result
+
+
+def _try_export_pdf(docx_path, result_dict):
+    """
+    尝试将 docx 导出为 PDF，将结果合并到 result_dict 中。
+    失败时记录警告而非抛出异常。
+    """
+    try:
+        from word_com_helper import convert_docx_to_pdf, check_word_available
+        
+        available, error_msg = check_word_available()
+        if not available:
+            logger.warning(f"PDF 导出跳过 - Word COM 不可用: {error_msg}")
+            result_dict['pdf_warning'] = f'PDF 导出跳过: {error_msg}'
+            return result_dict
+        
+        logger.info(f"正在导出 PDF...")
+        pdf_result = convert_docx_to_pdf(docx_path)
+        
+        if pdf_result['success']:
+            logger.info(f"PDF 导出成功: {pdf_result['pdf_path']}")
+            result_dict['pdf_path'] = pdf_result['pdf_path']
+        else:
+            logger.warning(f"PDF 导出失败: {pdf_result['message']}")
+            result_dict['pdf_warning'] = pdf_result['message']
+    except Exception as e:
+        logger.warning(f"PDF 导出异常: {str(e)}")
+        result_dict['pdf_warning'] = f'PDF 导出异常: {str(e)}'
+    
+    return result_dict

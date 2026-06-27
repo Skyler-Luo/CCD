@@ -565,3 +565,123 @@ def diagnose_document_pages(docx_path):
         except:
             pass
 
+
+def convert_docx_to_pdf(docx_path, pdf_path=None):
+    """
+    将 docx 文档转换为 PDF 格式
+    
+    使用 Word COM 自动化实现高保真转换，页眉、页脚、页码、字体均完美保留。
+    
+    Args:
+        docx_path: 输入的 docx 文件路径
+        pdf_path: 输出的 PDF 文件路径，默认为同目录同名 .pdf 文件
+        
+    Returns:
+        dict: 包含操作结果的字典
+            - success: 是否成功
+            - pdf_path: 输出 PDF 的路径
+            - message: 操作信息
+    """
+    available, error_msg = check_word_available()
+    if not available:
+        return {
+            'success': False,
+            'pdf_path': None,
+            'message': f'Word COM 不可用: {error_msg}'
+        }
+    
+    docx_path = os.path.abspath(docx_path)
+    if not os.path.isfile(docx_path):
+        return {
+            'success': False,
+            'pdf_path': None,
+            'message': f'docx 文件不存在: {docx_path}'
+        }
+    
+    if pdf_path is None:
+        pdf_path = os.path.splitext(docx_path)[0] + '.pdf'
+    pdf_path = os.path.abspath(pdf_path)
+    
+    import pythoncom
+    import win32com.client
+    
+    word = None
+    doc = None
+    com_initialized = False
+    
+    try:
+        # 在子线程中需要初始化 COM
+        pythoncom.CoInitialize()
+        com_initialized = True
+        
+        logger.info(f"启动 Word 进行 PDF 转换...")
+        word = win32com.client.DispatchEx("Word.Application")
+        word.Visible = False
+        word.DisplayAlerts = False
+        
+        logger.info(f"打开文档: {docx_path}")
+        doc = word.Documents.Open(docx_path, ReadOnly=True)
+        
+        logger.info(f"导出 PDF: {pdf_path}")
+        doc.ExportAsFixedFormat(
+            OutputFileName=pdf_path,
+            ExportFormat=17,  # wdExportFormatPDF
+        )
+        
+        # ExportAsFixedFormat 后 COM 连接可能断开，Close 失败是正常的
+        try:
+            doc.Close(False)
+            doc = None
+        except Exception:
+            doc = None
+        
+        # 以 PDF 文件是否实际存在来判断成功
+        if os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 0:
+            logger.info(f"PDF 导出成功: {pdf_path}")
+            return {
+                'success': True,
+                'pdf_path': pdf_path,
+                'message': 'PDF 导出成功'
+            }
+        else:
+            logger.error("PDF 文件未生成或为空")
+            return {
+                'success': False,
+                'pdf_path': None,
+                'message': 'PDF 文件未生成'
+            }
+        
+    except Exception as e:
+        logger.error(f"PDF 转换失败: {str(e)}", exc_info=True)
+        # 即使异常，也检查 PDF 是否已经生成
+        if os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 0:
+            logger.info(f"虽然出现异常，但 PDF 已成功生成: {pdf_path}")
+            return {
+                'success': True,
+                'pdf_path': pdf_path,
+                'message': 'PDF 导出成功（过程中有非致命异常）'
+            }
+        return {
+            'success': False,
+            'pdf_path': None,
+            'message': f'PDF 转换失败: {str(e)}'
+        }
+        
+    finally:
+        try:
+            if doc:
+                doc.Close(False)
+        except Exception:
+            pass
+        
+        try:
+            if word:
+                word.Quit()
+        except Exception:
+            pass
+        
+        if com_initialized:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass

@@ -77,6 +77,10 @@ from doc_generator import generate_code_doc
     help='保留注释行'
 )
 @click.option(
+    '--pdf', is_flag=True,
+    help='同时导出PDF文件'
+)
+@click.option(
     '--gui', is_flag=True,
     help='启动图形界面'
 )
@@ -88,7 +92,7 @@ def main(
         space_after, line_spacing,
         excludes, outfile, template_path,
         encoding, keep_blank_lines,
-        keep_comment_lines, gui, verbose
+        keep_comment_lines, pdf, gui, verbose
 ):
     if gui:
         from ui_main import launch_gui
@@ -117,7 +121,8 @@ def main(
         template_path=template_path,
         skip_blank_lines=not keep_blank_lines,
         skip_comment_lines=not keep_comment_lines,
-        encoding=encoding
+        encoding=encoding,
+        export_pdf=pdf
     )
     return 0
 
