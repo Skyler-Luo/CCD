@@ -193,7 +193,7 @@ CCD 通过在后台调起 Windows 系统的 Microsoft Word 进程进行高级文
 *   **支持的语言**：Python、JavaScript、TypeScript、Java、C/C++、Go、Rust、SQL、HTML/XML、CSS、Shell 等。
 *   **智能语义区分**：能够准确处理多行注释和块注释，且不会误伤代码字符串中包含的注释符号（例如 URL 中的 `http://` ）。
 
-## 🏗️ Project Structure | 项目结构
+## 🏗️ 项目结构
 
 ```
 CCD/
