@@ -249,7 +249,14 @@ CCD/
 
 ## 📄 许可证
 
-本项目基于 [MIT License](file:///e:/Study/ml_projects/CCD/LICENSE) 协议开源。
+本项目基于 [GPLv3 License](LICENSE) 协议开源。
+
+由于 [qfluentwidgets](https://qfluentwidgets.com/) 使用了GPLv3 许可证，根据 GPLv3 的条款，本项目整体也采用 GPLv3 许可证。
+
+- ✅ **允许**：自由使用、修改、分发（需保持开源）
+- ✅ **允许**：个人和非商业用途
+- ⚠️ **限制**：商业使用需购买 QFluentWidgets 商业许可证
+- ⚠️ **要求**：任何修改和派生作品必须同样开源并使用 GPLv3
 
 ## 🙏 致谢
 
