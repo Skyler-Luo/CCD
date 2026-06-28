@@ -260,6 +260,8 @@ CCD/
 *   [qfluentwidgets](https://qfluentwidgets.com/) - 现代化 Fluent Design 风格 UI 组件库。
 *   [pywin32](https://github.com/mhammond/pywin32) - Windows COM 自动化桥梁。
 
+---
+
 <div align="center">
   <p>如果这个项目对你有帮助，请给个 ⭐ Star 支持一下！</p>
   <p>让软著材料申请变得更简单！</p>
