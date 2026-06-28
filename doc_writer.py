@@ -10,12 +10,24 @@ from code_processor import (
 from docx.oxml.ns import qn
 
 
+ALIGN_MAP = {
+    'left': 'left', 'left_align': 'left', '左对齐': 'left', '左': 'left',
+    'center': 'center', 'center_align': 'center', '居中': 'center',
+    'right': 'right', 'right_align': 'right', '右对齐': 'right', '右': 'right'
+}
+
+POSITION_MAP = {
+    'header': 'header', '页眉': 'header',
+    'footer': 'footer', '页脚': 'footer'
+}
+
+
 def load_docx_dependencies():
     """
     延迟导入 python-docx 依赖，避免在仅扫描时强制安装
     
     Returns:
-        (Document, Pt, WD_PARAGRAPH_ALIGNMENT)
+        (Document, Pt, WD_PARAGRAPH_ALIGNMENT, WD_TAB_ALIGNMENT)
         
     Raises:
         RuntimeError: 未安装 python-docx 或安装了错误的 docx 包
@@ -23,8 +35,8 @@ def load_docx_dependencies():
     try:
         from docx import Document
         from docx.shared import Pt
-        from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-        return Document, Pt, WD_PARAGRAPH_ALIGNMENT
+        from docx.enum.text import WD_PARAGRAPH_ALIGNMENT, WD_TAB_ALIGNMENT
+        return Document, Pt, WD_PARAGRAPH_ALIGNMENT, WD_TAB_ALIGNMENT
     except Exception as exc:
         raise RuntimeError('未检测到可用的python-docx，请安装python-docx并卸载docx包') from exc
 
@@ -46,13 +58,13 @@ class CodeWriter:
     """
     将源码文件按行写入 docx 文档
     
-    支持配置：
-        - 页眉标题
+    Supports configuration of:
+        - 页眉标题及对齐方式
         - 字体、字号、段前/段后/行距
         - 空行/注释过滤
         - docx 模板
         - 页眉和页脚字体独立设置
-        - 页脚页码格式自定义
+        - 页脚或页眉页码位置及对齐方式
     """
     def __init__(
             self, font_name='Consolas',
@@ -65,9 +77,12 @@ class CodeWriter:
             top_margin=2.5, bottom_margin=2.5,
             left_margin=2.5, right_margin=2.5,
             header_distance=1.5, footer_distance=1.75,
-            page_number_format='第 {page} 页 共 {total} 页'
+            page_number_format='{page}',
+            header_title_align='左对齐',
+            page_number_position='页眉',
+            page_number_align='右对齐'
     ):
-        Document, Pt, WD_PARAGRAPH_ALIGNMENT = load_docx_dependencies()
+        Document, Pt, WD_PARAGRAPH_ALIGNMENT, WD_TAB_ALIGNMENT = load_docx_dependencies()
         self.font_name = font_name
         self.font_size = font_size
         self.space_before = space_before
@@ -80,8 +95,12 @@ class CodeWriter:
         self.header_font = header_font
         self.header_font_size = header_font_size
         self.page_number_format = page_number_format
+        self.header_title_align = header_title_align
+        self.page_number_position = page_number_position
+        self.page_number_align = page_number_align
         self._Pt = Pt
         self._WD_PARAGRAPH_ALIGNMENT = WD_PARAGRAPH_ALIGNMENT
+        self._WD_TAB_ALIGNMENT = WD_TAB_ALIGNMENT
         self.document = document if document else create_document(template_path, Document)
         
         # 设置页面边距（可自定义，默认为软著标准）
@@ -106,10 +125,111 @@ class CodeWriter:
         line = line.lstrip()
         return any(line.startswith(ch) for ch in self.command_chars)
 
-    def write_header(self, title):
-        """写入页眉标题，使用独立的页眉和页脚字体设置"""
-        from docx.oxml.ns import qn
+    def _add_title_runs(self, paragraph, title):
+        """向段落中追加标题文本"""
+        run = paragraph.add_run(title)
+        run.font.name = self.header_font
+        run.font.size = self._Pt(self.header_font_size)
+        run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+
+    def _add_page_number_runs(self, paragraph):
+        """向段落中追加页码相关的 XML 元素和 text runs"""
         from docx.oxml import OxmlElement
+        
+        # 如果既没有 {page} 也没有 {total}，直接当作普通文本写入
+        if '{page}' not in self.page_number_format and '{total}' not in self.page_number_format:
+            run = paragraph.add_run(self.page_number_format)
+            run.font.name = self.header_font
+            run.font.size = self._Pt(self.header_font_size)
+            run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+            return
+
+        # 否则，我们需要按顺序解析替换 {page} 和 {total} 为 Word 域代码
+        format_str = self.page_number_format
+        tokens = []
+        
+        while format_str:
+            idx_page = format_str.find('{page}')
+            idx_total = format_str.find('{total}')
+            
+            # 找到最近的占位符
+            if idx_page != -1 and (idx_total == -1 or idx_page < idx_total):
+                if idx_page > 0:
+                    tokens.append(('text', format_str[:idx_page]))
+                tokens.append(('page', None))
+                format_str = format_str[idx_page + 6:]
+            elif idx_total != -1 and (idx_page == -1 or idx_total < idx_page):
+                if idx_total > 0:
+                    tokens.append(('text', format_str[:idx_total]))
+                tokens.append(('total', None))
+                format_str = format_str[idx_total + 7:]
+            else:
+                tokens.append(('text', format_str))
+                format_str = ''
+        
+        for tok_type, tok_val in tokens:
+            if tok_type == 'text':
+                run = paragraph.add_run(tok_val)
+                run.font.name = self.header_font
+                run.font.size = self._Pt(self.header_font_size)
+                run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+            elif tok_type == 'page':
+                # 添加当前页码域 PAGE
+                fld_simple = OxmlElement('w:fldSimple')
+                fld_simple.set(qn('w:instr'), 'PAGE')
+                run_elem = OxmlElement('w:r')
+                r_pr = OxmlElement('w:rPr')
+                r_fonts = OxmlElement('w:rFonts')
+                r_fonts.set(qn('w:ascii'), self.header_font)
+                r_fonts.set(qn('w:eastAsia'), self.header_font)
+                r_fonts.set(qn('w:hAnsi'), self.header_font)
+                r_pr.append(r_fonts)
+                sz = OxmlElement('w:sz')
+                sz.set(qn('w:val'), str(int(self.header_font_size * 2)))
+                r_pr.append(sz)
+                sz_cs = OxmlElement('w:szCs')
+                sz_cs.set(qn('w:val'), str(int(self.header_font_size * 2)))
+                r_pr.append(sz_cs)
+                run_elem.append(r_pr)
+                
+                # 添加 w:t 元素存放临时数值，保证 Word 保留 run 格式
+                t_elem = OxmlElement('w:t')
+                t_elem.text = '1'
+                run_elem.append(t_elem)
+                
+                fld_simple.append(run_elem)
+                paragraph._element.append(fld_simple)
+            elif tok_type == 'total':
+                # 添加总页数域 NUMPAGES
+                fld_simple = OxmlElement('w:fldSimple')
+                fld_simple.set(qn('w:instr'), 'NUMPAGES')
+                run_elem = OxmlElement('w:r')
+                r_pr = OxmlElement('w:rPr')
+                r_fonts = OxmlElement('w:rFonts')
+                r_fonts.set(qn('w:ascii'), self.header_font)
+                r_fonts.set(qn('w:eastAsia'), self.header_font)
+                r_fonts.set(qn('w:hAnsi'), self.header_font)
+                r_pr.append(r_fonts)
+                sz = OxmlElement('w:sz')
+                sz.set(qn('w:val'), str(int(self.header_font_size * 2)))
+                r_pr.append(sz)
+                sz_cs = OxmlElement('w:szCs')
+                sz_cs.set(qn('w:val'), str(int(self.header_font_size * 2)))
+                r_pr.append(sz_cs)
+                run_elem.append(r_pr)
+                
+                # 添加 w:t 元素存放临时数值，保证 Word 保留 run 格式
+                t_elem = OxmlElement('w:t')
+                t_elem.text = '1'
+                run_elem.append(t_elem)
+                
+                fld_simple.append(run_elem)
+                paragraph._element.append(fld_simple)
+
+    def write_header(self, title):
+        """写入页眉标题，可能同时包含页码，使用独立的页眉和页脚字体设置"""
+        from docx.oxml import OxmlElement
+        from docx.shared import Emu
         
         section = self.document.sections[0]
         header = section.header
@@ -121,7 +241,6 @@ class CodeWriter:
         
         # 重新添加一个干净的段落
         paragraph = header.add_paragraph()
-        paragraph.alignment = self._WD_PARAGRAPH_ALIGNMENT.CENTER
         
         # 设置段落格式 - 紧凑无间距
         pf = paragraph.paragraph_format
@@ -146,19 +265,93 @@ class CodeWriter:
         suppress = OxmlElement('w:suppressLineNumbers')
         pPr.append(suppress)
         
-        # 添加文本
-        run = paragraph.add_run(title)
-        run.font.name = self.header_font
-        run.font.size = self._Pt(self.header_font_size)
-        # 为中文字体设置东亚字体属性
-        run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+        # 判断页码是否在页眉
+        p_pos = POSITION_MAP.get(self.page_number_position, 'header')
         
+        if p_pos == 'header':
+            # 页眉同时包含标题和页码
+            t_align = ALIGN_MAP.get(self.header_title_align, 'left')
+            p_align = ALIGN_MAP.get(self.page_number_align, 'right')
+            
+            align_order = {'left': 0, 'center': 1, 'right': 2}
+            t_order = align_order[t_align]
+            p_order = align_order[p_align]
+            
+            # 安全防范：如果对齐方式相同，强制让页码和标题不重叠
+            if t_order == p_order:
+                if t_order == 0:
+                    p_align = 'right'
+                    p_order = 2
+                else:
+                    t_align = 'left'
+                    t_order = 0
+            
+            components = [(t_order, 'title'), (p_order, 'page')]
+            components.sort(key=lambda x: x[0])
+            
+            pos1, type1 = components[0]
+            pos2, type2 = components[1]
+            
+            paragraph.alignment = self._WD_PARAGRAPH_ALIGNMENT.LEFT
+            pf.tab_stops.clear_all()
+            
+            text_width = section.page_width - section.left_margin - section.right_margin
+            
+            def write_comp(comp_type):
+                if comp_type == 'title':
+                    self._add_title_runs(paragraph, title)
+                elif comp_type == 'page':
+                    self._add_page_number_runs(paragraph)
+            
+            if pos1 == 0 and pos2 == 1:
+                # Left, Center
+                pf.tab_stops.add_tab_stop(Emu(int(text_width / 2)), alignment=self._WD_TAB_ALIGNMENT.CENTER)
+                write_comp(type1)
+                tab_run = paragraph.add_run('\t')
+                tab_run.font.name = self.header_font
+                tab_run.font.size = self._Pt(self.header_font_size)
+                tab_run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+                write_comp(type2)
+            elif pos1 == 0 and pos2 == 2:
+                # Left, Right
+                pf.tab_stops.add_tab_stop(Emu(int(text_width)), alignment=self._WD_TAB_ALIGNMENT.RIGHT)
+                write_comp(type1)
+                tab_run = paragraph.add_run('\t')
+                tab_run.font.name = self.header_font
+                tab_run.font.size = self._Pt(self.header_font_size)
+                tab_run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+                write_comp(type2)
+            elif pos1 == 1 and pos2 == 2:
+                # Center, Right
+                pf.tab_stops.add_tab_stop(Emu(int(text_width / 2)), alignment=self._WD_TAB_ALIGNMENT.CENTER)
+                pf.tab_stops.add_tab_stop(Emu(int(text_width)), alignment=self._WD_TAB_ALIGNMENT.RIGHT)
+                tab_run1 = paragraph.add_run('\t')
+                tab_run1.font.name = self.header_font
+                tab_run1.font.size = self._Pt(self.header_font_size)
+                tab_run1._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+                write_comp(type1)
+                tab_run2 = paragraph.add_run('\t')
+                tab_run2.font.name = self.header_font
+                tab_run2.font.size = self._Pt(self.header_font_size)
+                tab_run2._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+                write_comp(type2)
+        else:
+            # 页眉只包含标题
+            t_align = ALIGN_MAP.get(self.header_title_align, 'left')
+            if t_align == 'left':
+                paragraph.alignment = self._WD_PARAGRAPH_ALIGNMENT.LEFT
+            elif t_align == 'center':
+                paragraph.alignment = self._WD_PARAGRAPH_ALIGNMENT.CENTER
+            else:
+                paragraph.alignment = self._WD_PARAGRAPH_ALIGNMENT.RIGHT
+            
+            self._add_title_runs(paragraph, title)
+            
         return self
     
     def write_footer(self):
         """添加页脚页码"""
         from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
         
         section = self.document.sections[0]
         footer = section.footer
@@ -169,7 +362,6 @@ class CodeWriter:
         
         # 重新添加一个干净的段落
         footer_para = footer.add_paragraph()
-        footer_para.alignment = self._WD_PARAGRAPH_ALIGNMENT.CENTER
         
         # 禁止页脚换行 - 多重设置确保不换行
         footer_para.paragraph_format.widow_control = False
@@ -185,76 +377,20 @@ class CodeWriter:
         keep_lines = OxmlElement('w:keepLines')
         pPr.append(keep_lines)
         
-        # 如果格式包含 {page} 和 {total}，使用域代码
-        if '{page}' in self.page_number_format and '{total}' in self.page_number_format:
-            parts = self.page_number_format.split('{page}')
-            if parts[0]:
-                run = footer_para.add_run(parts[0])
-                run.font.name = self.header_font
-                run.font.size = self._Pt(self.header_font_size)
-                run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+        p_pos = POSITION_MAP.get(self.page_number_position, 'header')
+        if p_pos == 'footer':
+            p_align = ALIGN_MAP.get(self.page_number_align, 'right')
+            if p_align == 'left':
+                footer_para.alignment = self._WD_PARAGRAPH_ALIGNMENT.LEFT
+            elif p_align == 'center':
+                footer_para.alignment = self._WD_PARAGRAPH_ALIGNMENT.CENTER
+            else:
+                footer_para.alignment = self._WD_PARAGRAPH_ALIGNMENT.RIGHT
             
-            # 添加当前页码域
-            fld_simple = OxmlElement('w:fldSimple')
-            fld_simple.set(qn('w:instr'), 'PAGE')
-            run_elem = OxmlElement('w:r')
-            # 为域代码设置字体属性
-            r_pr = OxmlElement('w:rPr')
-            r_fonts = OxmlElement('w:rFonts')
-            r_fonts.set(qn('w:ascii'), self.header_font)
-            r_fonts.set(qn('w:eastAsia'), self.header_font)
-            r_fonts.set(qn('w:hAnsi'), self.header_font)
-            r_pr.append(r_fonts)
-            sz = OxmlElement('w:sz')
-            sz.set(qn('w:val'), str(int(self.header_font_size * 2)))
-            r_pr.append(sz)
-            sz_cs = OxmlElement('w:szCs')
-            sz_cs.set(qn('w:val'), str(int(self.header_font_size * 2)))
-            r_pr.append(sz_cs)
-            run_elem.append(r_pr)
-            fld_simple.append(run_elem)
-            footer_para._element.append(fld_simple)
-            
-            if len(parts) > 1 and '{total}' in parts[1]:
-                mid_parts = parts[1].split('{total}')
-                if mid_parts[0]:
-                    run = footer_para.add_run(mid_parts[0])
-                    run.font.name = self.header_font
-                    run.font.size = self._Pt(self.header_font_size)
-                    run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
-                
-                # 添加总页数域
-                fld_simple2 = OxmlElement('w:fldSimple')
-                fld_simple2.set(qn('w:instr'), 'NUMPAGES')
-                run_elem2 = OxmlElement('w:r')
-                # 为域代码设置字体属性
-                r_pr2 = OxmlElement('w:rPr')
-                r_fonts2 = OxmlElement('w:rFonts')
-                r_fonts2.set(qn('w:ascii'), self.header_font)
-                r_fonts2.set(qn('w:eastAsia'), self.header_font)
-                r_fonts2.set(qn('w:hAnsi'), self.header_font)
-                r_pr2.append(r_fonts2)
-                sz2 = OxmlElement('w:sz')
-                sz2.set(qn('w:val'), str(int(self.header_font_size * 2)))
-                r_pr2.append(sz2)
-                sz_cs2 = OxmlElement('w:szCs')
-                sz_cs2.set(qn('w:val'), str(int(self.header_font_size * 2)))
-                r_pr2.append(sz_cs2)
-                run_elem2.append(r_pr2)
-                fld_simple2.append(run_elem2)
-                footer_para._element.append(fld_simple2)
-                
-                if len(mid_parts) > 1:
-                    run = footer_para.add_run(mid_parts[1])
-                    run.font.name = self.header_font
-                    run.font.size = self._Pt(self.header_font_size)
-                    run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+            self._add_page_number_runs(footer_para)
         else:
-            # 简单文本格式
-            run = footer_para.add_run(self.page_number_format)
-            run.font.name = self.header_font
-            run.font.size = self._Pt(self.header_font_size)
-            run._element.rPr.rFonts.set(qn('w:eastAsia'), self.header_font)
+            # 页脚不写页码，保持居中空行
+            footer_para.alignment = self._WD_PARAGRAPH_ALIGNMENT.CENTER
         
         return self
 

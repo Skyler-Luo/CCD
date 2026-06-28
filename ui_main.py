@@ -10,7 +10,7 @@ import sys
 os.environ['QT_LOGGING_RULES'] = '*.debug=false;qt.qpa.*=false'
 
 from PyQt5.QtCore import QEvent, Qt, QTimer, QUrl
-from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtGui import QDesktopServices, QIcon
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QFileDialog, QScrollArea, QMainWindow, QDialog, QMessageBox
@@ -34,7 +34,35 @@ class GeneratorWindow(QMainWindow):
         super().__init__()
         setTheme(Theme.AUTO)
         self.setWindowTitle('软著源代码文档生成器')
-        self.resize(1000, 720)
+        self.resize(1020, 720)
+        
+        # 设置窗口图标
+        icon_path = os.path.join(os.path.dirname(__file__), 'logo.ico')
+        if os.path.exists(icon_path):
+            from PyQt5.QtGui import QPixmap, QPainter, QPainterPath
+            pixmap = QPixmap(icon_path)
+            if not pixmap.isNull():
+                size = min(pixmap.width(), pixmap.height())
+                # 创建一个支持透明通道的目标图像
+                circular_pixmap = QPixmap(size, size)
+                circular_pixmap.fill(Qt.transparent)
+                
+                # 绘制圆形裁剪后的图像
+                painter = QPainter(circular_pixmap)
+                painter.setRenderHint(QPainter.Antialiasing)
+                
+                # 边缘收缩 2%，切除外围的白色边缘
+                margin = max(2, int(size * 0.02))
+                path = QPainterPath()
+                path.addEllipse(margin, margin, size - 2 * margin, size - 2 * margin)
+                
+                painter.setClipPath(path)
+                painter.drawPixmap(0, 0, pixmap)
+                painter.end()
+                
+                self.setWindowIcon(QIcon(circular_pixmap))
+            else:
+                self.setWindowIcon(QIcon(icon_path))
         self.worker = None
         self.ext_worker = None
         self.pending_ext_scan = False
@@ -208,8 +236,22 @@ class GeneratorWindow(QMainWindow):
         self.title_edit = LineEdit()
         self.title_edit.setText('软件著作权程序鉴别材料生成器V1.0')
         self.title_edit.setMinimumHeight(32)
+        
+        self.title_align_combo = ComboBox()
+        self.title_align_combo.addItems(['左对齐', '居中', '右对齐'])
+        self.title_align_combo.setCurrentText('左对齐')
+        self.title_align_combo.setMinimumHeight(32)
+        self.title_align_combo.setMinimumWidth(100)
+        
+        title_row = QWidget()
+        title_layout = QHBoxLayout(title_row)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(8)
+        title_layout.addWidget(self.title_edit, 1)
+        title_layout.addWidget(self.title_align_combo)
+        
         output_grid.addWidget(BodyLabel('页眉标题'), 0, 0)
-        output_grid.addWidget(self.title_edit, 0, 1)
+        output_grid.addWidget(title_row, 0, 1)
 
         self.outfile_edit = LineEdit()
         self.outfile_edit.setText(os.path.abspath('code.docx'))
@@ -426,10 +468,10 @@ class GeneratorWindow(QMainWindow):
         # 页码格式
         self.page_number_combo = ComboBox()
         self.page_number_combo.addItems([
+            '{page}',
             '第 {page} 页 共 {total} 页',
             '{page} / {total}',
             'Page {page} of {total}',
-            '{page}',
             '自定义...'
         ])
         self.page_number_combo.setMinimumHeight(32)
@@ -443,6 +485,22 @@ class GeneratorWindow(QMainWindow):
         self.custom_page_number_edit.setMinimumHeight(32)
         self.custom_page_number_edit.setVisible(False)
         page_grid.addWidget(self.custom_page_number_edit, 1, 1)
+
+        # 页码位置
+        self.page_loc_combo = ComboBox()
+        self.page_loc_combo.addItems(['页眉', '页脚'])
+        self.page_loc_combo.setCurrentText('页眉')
+        self.page_loc_combo.setMinimumHeight(32)
+        page_grid.addWidget(BodyLabel('页码位置'), 2, 0)
+        page_grid.addWidget(self.page_loc_combo, 2, 1)
+
+        # 页码对齐
+        self.page_align_combo = ComboBox()
+        self.page_align_combo.addItems(['左对齐', '居中', '右对齐'])
+        self.page_align_combo.setCurrentText('右对齐')
+        self.page_align_combo.setMinimumHeight(32)
+        page_grid.addWidget(BodyLabel('页码对齐'), 3, 0)
+        page_grid.addWidget(self.page_align_combo, 3, 1)
 
         # 恢复默认按钮
         style_layout.addSpacing(8)
@@ -541,6 +599,12 @@ class GeneratorWindow(QMainWindow):
         self.skip_blank_check.toggled.connect(self._update_summary)
         self.skip_comment_check.toggled.connect(self._update_summary)
         self.pages_60_check.toggled.connect(self._update_summary)
+        self.title_align_combo.currentTextChanged.connect(lambda: self._validate_header_footer_positions('title_align'))
+        self.title_align_combo.currentTextChanged.connect(self._update_summary)
+        self.page_loc_combo.currentTextChanged.connect(lambda: self._validate_header_footer_positions('page_loc'))
+        self.page_loc_combo.currentTextChanged.connect(self._update_summary)
+        self.page_align_combo.currentTextChanged.connect(lambda: self._validate_header_footer_positions('page_align'))
+        self.page_align_combo.currentTextChanged.connect(self._update_summary)
         self.exts_select_btn.clicked.connect(self.open_extension_dialog)
         self.comment_select_btn.clicked.connect(self.open_comment_prefix_dialog)
         self._update_open_output_enabled()
@@ -554,6 +618,37 @@ class GeneratorWindow(QMainWindow):
             self.custom_page_number_edit.setVisible(True)
         else:
             self.custom_page_number_edit.setVisible(False)
+
+    def _validate_header_footer_positions(self, changed_source):
+        """
+        验证和自动调整页眉标题和页码位置，防止重叠
+        changed_source 可以是 'title_align', 'page_loc', 'page_align'
+        """
+        if self.page_loc_combo.currentText() == '页脚':
+            return
+            
+        t_align = self.title_align_combo.currentText()
+        p_align = self.page_align_combo.currentText()
+        
+        if t_align == p_align:
+            # 冲突了，需要调整
+            aligns = ['左对齐', '居中', '右对齐']
+            aligns.remove(t_align)
+            
+            if changed_source == 'title_align':
+                # 用户改了标题，调整页码
+                next_align = '右对齐' if '右对齐' in aligns else aligns[0]
+                self.page_align_combo.blockSignals(True)
+                self.page_align_combo.setCurrentText(next_align)
+                self.page_align_combo.blockSignals(False)
+                self._notify('warning', '对齐方式冲突', f'标题和页码不能在同一位置，已自动将页码调整为【{next_align}】')
+            else:
+                # 用户改了页码，调整标题
+                next_align = '左对齐' if '左对齐' in aligns else aligns[0]
+                self.title_align_combo.blockSignals(True)
+                self.title_align_combo.setCurrentText(next_align)
+                self.title_align_combo.blockSignals(False)
+                self._notify('warning', '对齐方式冲突', f'标题和页码不能在同一位置，已自动将标题调整为【{next_align}】')
 
     def _create_group(self, title):
         group = CardWidget()
@@ -654,7 +749,7 @@ class GeneratorWindow(QMainWindow):
         # 获取页码格式
         page_number_format = self.page_number_combo.currentText()
         if page_number_format == '自定义...':
-            page_number_format = self.custom_page_number_edit.text().strip() or '第 {page} 页 共 {total} 页'
+            page_number_format = self.custom_page_number_edit.text().strip() or '{page}'
         
         return {
             'title': title,
@@ -683,7 +778,10 @@ class GeneratorWindow(QMainWindow):
             'page_number_format': page_number_format,
             'selected_files': self.selected_files if self.selected_files else None,
             'pages_60_mode': self.pages_60_check.isChecked(),
-            'export_pdf': self.export_pdf_check.isChecked()
+            'export_pdf': self.export_pdf_check.isChecked(),
+            'header_title_align': self.title_align_combo.currentText().strip() or '左对齐',
+            'page_number_position': self.page_loc_combo.currentText().strip() or '页眉',
+            'page_number_align': self.page_align_combo.currentText().strip() or '右对齐'
         }
 
     def schedule_extension_scan(self):
@@ -945,7 +1043,10 @@ class GeneratorWindow(QMainWindow):
         self.right_margin_spin.setValue(2.5)
         self.header_distance_spin.setValue(1.5)
         self.footer_distance_spin.setValue(1.75)
-        self.page_number_combo.setCurrentText('第 {page} 页 共 {total} 页')
+        self.page_number_combo.setCurrentText('{page}')
+        self.title_align_combo.setCurrentText('左对齐')
+        self.page_loc_combo.setCurrentText('页眉')
+        self.page_align_combo.setCurrentText('右对齐')
 
     def _notify(self, level, title, content):
         """统一的通知方法"""
@@ -980,6 +1081,8 @@ class GeneratorWindow(QMainWindow):
                 return False, '输出目录不存在：{}'.format(output_dir)
             if config['template_path'] and not os.path.isfile(config['template_path']):
                 return False, '模板文件不存在：{}'.format(config['template_path'])
+            if config.get('page_number_position') == '页眉' and config.get('header_title_align') == config.get('page_number_align'):
+                return False, '页眉标题和页码不能在同一位置（目前同为【{}】）'.format(config.get('header_title_align'))
         return True, ''
 
     def _update_open_output_enabled(self):
@@ -991,8 +1094,6 @@ class GeneratorWindow(QMainWindow):
         if not directory:
             directory = os.getcwd()
         self.open_output_btn.setEnabled(os.path.isdir(directory))
-
-
 
 
 def launch_gui():

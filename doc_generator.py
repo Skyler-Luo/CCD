@@ -31,9 +31,12 @@ def generate_code_doc(
         top_margin=2.5, bottom_margin=2.5,
         left_margin=2.5, right_margin=2.5,
         header_distance=1.5, footer_distance=1.75,
-        page_number_format='第 {page} 页 共 {total} 页',
+        page_number_format='{page}',
         selected_files=None, pages_60_mode=False,
-        export_pdf=False
+        export_pdf=False,
+        header_title_align='左对齐',
+        page_number_position='页眉',
+        page_number_align='右对齐'
 ):
     """
     生成 docx 源代码文档
@@ -116,7 +119,10 @@ def generate_code_doc(
         right_margin=right_margin,
         header_distance=header_distance,
         footer_distance=footer_distance,
-        page_number_format=page_number_format
+        page_number_format=page_number_format,
+        header_title_align=header_title_align,
+        page_number_position=page_number_position,
+        page_number_align=page_number_align
     )
     writer.write_header(title)
     writer.write_footer()

@@ -81,6 +81,21 @@ from doc_generator import generate_code_doc
     help='同时导出PDF文件'
 )
 @click.option(
+    '--header-title-align', default='左对齐',
+    type=click.Choice(['左对齐', '居中', '右对齐']),
+    help='页眉标题对齐方式，默认为左对齐'
+)
+@click.option(
+    '--page-number-position', default='页眉',
+    type=click.Choice(['页眉', '页脚']),
+    help='页码位置，默认为页眉'
+)
+@click.option(
+    '--page-number-align', default='右对齐',
+    type=click.Choice(['左对齐', '居中', '右对齐']),
+    help='页码对齐方式，默认为右对齐'
+)
+@click.option(
     '--gui', is_flag=True,
     help='启动图形界面'
 )
@@ -92,7 +107,9 @@ def main(
         space_after, line_spacing,
         excludes, outfile, template_path,
         encoding, keep_blank_lines,
-        keep_comment_lines, pdf, gui, verbose
+        keep_comment_lines, pdf,
+        header_title_align, page_number_position, page_number_align,
+        gui, verbose
 ):
     if gui:
         from ui_main import launch_gui
@@ -122,7 +139,10 @@ def main(
         skip_blank_lines=not keep_blank_lines,
         skip_comment_lines=not keep_comment_lines,
         encoding=encoding,
-        export_pdf=pdf
+        export_pdf=pdf,
+        header_title_align=header_title_align,
+        page_number_position=page_number_position,
+        page_number_align=page_number_align
     )
     return 0
 
