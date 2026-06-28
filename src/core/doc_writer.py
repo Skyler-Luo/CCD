@@ -3,7 +3,7 @@
 文档写入模块
 负责将代码写入docx文档，支持格式化和页眉页脚
 """
-from code_processor import (
+from src.core.code_processor import (
     DEFAULT_COMMENT_CHARS, decode_content,
     get_language_by_extension, filter_lines
 )

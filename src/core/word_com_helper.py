@@ -7,7 +7,7 @@ Word COM 自动化辅助模块
 import os
 import sys
 import tempfile
-from logger import get_logger
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

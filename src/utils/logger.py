@@ -23,7 +23,9 @@ class Logger:
     
     def _initialize(self):
         """初始化日志系统"""
-        project_dir = os.path.dirname(os.path.abspath(__file__))
+        utils_dir = os.path.dirname(os.path.abspath(__file__))
+        src_dir = os.path.dirname(utils_dir)
+        project_dir = os.path.dirname(src_dir)
         self.log_dir = os.path.join(project_dir, 'logs')
         os.makedirs(self.log_dir, exist_ok=True)
         

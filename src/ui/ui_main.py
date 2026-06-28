@@ -21,13 +21,13 @@ from qfluentwidgets import (
     TitleLabel, BodyLabel, CardWidget, setTheme, Theme
 )
 
-from code_processor import (
+from src.core.code_processor import (
     normalize_items, normalize_exts, normalize_paths, read_gitignore_excludes,
     DEFAULT_SKIP_DIRS, DEFAULT_SKIP_FILES, LANGUAGE_BY_EXT
 )
-from ui_tasks import GenerateWorker, ExtensionScanWorker
-from ui_dialogs import ExtensionSelectDialog, CommentPrefixDialog, FileSelectDialog, LogViewDialog, COMMENT_PREFIX_BY_LANG
-from logger import get_logger
+from src.ui.ui_tasks import GenerateWorker, ExtensionScanWorker
+from src.ui.ui_dialogs import ExtensionSelectDialog, CommentPrefixDialog, FileSelectDialog, LogViewDialog, COMMENT_PREFIX_BY_LANG
+from src.utils.logger import get_logger
 
 class GeneratorWindow(QMainWindow):
     def __init__(self):
@@ -37,7 +37,8 @@ class GeneratorWindow(QMainWindow):
         self.resize(1020, 720)
         
         # 设置窗口图标
-        icon_path = os.path.join(os.path.dirname(__file__), 'logo.ico')
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        icon_path = os.path.join(project_root, 'assets', 'logo.ico')
         if os.path.exists(icon_path):
             from PyQt5.QtGui import QPixmap, QPainter, QPainterPath
             pixmap = QPixmap(icon_path)

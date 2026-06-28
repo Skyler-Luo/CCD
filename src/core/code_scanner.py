@@ -11,7 +11,7 @@ try:
 except ImportError:
     from scandir import scandir
 
-from code_processor import (
+from src.core.code_processor import (
     is_binary_file, decode_content, get_language_by_extension,
     strip_comments, filter_lines
 )

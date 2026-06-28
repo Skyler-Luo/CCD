@@ -1,4 +1,10 @@
-# Code-Copyright-Docgen: 一键生成符合软著要求的源代码文档
+<div align="center">
+  <img src="assets/logo.png" width="96" height="96" alt="Logo">
+  <h1>Code-Copyright-Docgen (CCD)</h1>
+  <p>一键生成软著源代码文档</p>
+</div>
+
+---
 
 CCD 是一个专为软件著作权申请设计的源代码文档生成工具。它能够自动扫描项目源码，按照软著规范生成符合格式要求的 Word 文档（.docx），并可同时导出 PDF，大幅简化软著材料准备工作。
 
@@ -15,7 +21,7 @@ CCD 是一个专为软件著作权申请设计的源代码文档生成工具。�
 - 📝 **完整日志** - 详细的操作日志，支持实时查看和问题排查
 - 🌐 **多平台支持** - Windows、macOS、Linux 全平台支持（60页模式与PDF导出仅Windows）
 
-![界面示例图](img.png)
+![界面示例图](assets/img.png)
 
 ## 📦 安装
 
@@ -63,6 +69,10 @@ pywin32>=300           # Windows COM 自动化（仅Windows，60页模式和PDF�
 ### 方式一：图形界面（推荐）
 
 ```bash
+# 推荐直接使用 main.py 运行
+python main.py
+
+# 也可以使用 cli.py 标志运行
 python cli.py --gui
 ```
 
@@ -298,40 +308,48 @@ CCD 使用 Word COM 自动化技术实现精确的60页提取和 PDF 导出：
 
 ```
 CCD/
-├── cli.py                 # 命令行入口
-├── logger.py              # 日志管理（自动轮转）
-├── code_scanner.py        # 代码扫描（CodeFinder类）
-├── code_processor.py      # 代码处理工具（语言识别、注释过滤）
-├── doc_writer.py          # 文档写入（CodeWriter类，处理格式）
-├── doc_generator.py       # 文档生成主流程
-├── word_com_helper.py     # Word COM自动化（60页模式 + PDF导出）
-├── ui_main.py             # 主窗口界面（Fluent Design）
-├── ui_dialogs.py          # 对话框组件（文件选择、日志查看）
-├── ui_tasks.py            # 后台任务（Worker线程）
-├── requirements.txt       # 依赖包列表
-├── README.md              # 项目说明（本文件）
-├── LICENSE                # MIT 许可证
-└── logs/                  # 日志目录（自动创建）
-    ├── ccd.log            # 完整日志
-    └── ccd_error.log      # 错误日志
+├── src/                        # 源码包
+│   ├── core/                   # 核心业务逻辑
+│   │   ├── code_processor.py   # 代码处理工具（语言识别、注释过滤）
+│   │   ├── code_scanner.py     # 代码扫描与行数统计
+│   │   ├── doc_generator.py    # 文档生成主协调流程
+│   │   ├── doc_writer.py       # python-docx 格式写入与样式配置
+│   │   └── word_com_helper.py  # Word COM 自动化（60页模式 + PDF导出）
+│   ├── ui/                     # PyQt5 GUI 界面
+│   │   ├── ui_main.py          # 主窗口界面（Fluent Design）
+│   │   ├── ui_dialogs.py       # 对话框组件（文件选择、日志查看）
+│   │   └── ui_tasks.py         # 后台异步任务（GenerateWorker等）
+│   └── utils/                  # 公共工具
+│       └── logger.py           # 日志管理（自动轮转与输出）
+├── assets/                     # 静态资源文件
+│   ├── logo.ico                # 窗口图标
+│   └── img.png                 # 界面示例截图
+├── cli.py                      # 命令行入口脚本
+├── main.py                     # 图形界面启动入口脚本
+├── requirements.txt            # 依赖包列表
+├── README.md                   # 项目说明（本文件）
+├── LICENSE                     # MIT 许可证
+└── logs/                       # 日志目录（自动创建）
+    ├── ccd.log                 # 完整日志
+    └── ccd_error.log           # 错误日志
 ```
 
 ### 核心模块说明
 
-**word_com_helper.py** - Word COM 自动化模块
+**src/core/word_com_helper.py** - Word COM 自动化模块
 - `check_word_available()` - 检查 Word 是否可用
 - `extract_60_pages()` - 精确提取60页的核心算法
 - `convert_docx_to_pdf()` - 高保真 PDF 导出
 - `diagnose_document_pages()` - 文档页数诊断工具
 
-**ui_dialogs.py** - 对话框组件
+**src/ui/ui_dialogs.py** - 对话框组件
 - `FileSelectDialog` - 文件选择对话框（双栏布局）
 - `LogViewerDialog` - 日志查看器
 - `PageNumberFormatDialog` - 页码格式选择器
 
-**ui_tasks.py** - 后台任务
-- `Worker` - 通用后台任务线程
-- `ExtensionWorker` - 文件后缀扫描线程
+**src/ui/ui_tasks.py** - 后台任务
+- `GenerateWorker` - 通用后台任务处理线程
+- `ExtensionScanWorker` - 文件后缀扫描线程
 
 ## 📄 许可证
 

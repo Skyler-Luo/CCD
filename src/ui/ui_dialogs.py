@@ -16,8 +16,8 @@ from qfluentwidgets import (
     PushButton, LineEdit, BodyLabel, PrimaryPushButton, TextEdit
 )
 
-from code_processor import LANGUAGE_BY_EXT, decode_content, get_language_by_extension
-from logger import Logger
+from src.core.code_processor import LANGUAGE_BY_EXT, decode_content, get_language_by_extension
+from src.utils.logger import Logger
 
 # 注释前缀映射
 COMMENT_PREFIX_BY_LANG = {

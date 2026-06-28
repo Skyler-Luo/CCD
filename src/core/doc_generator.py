@@ -7,15 +7,15 @@ import os
 import tempfile
 from os.path import abspath
 
-from code_processor import (
+from src.core.code_processor import (
     DEFAULT_INDIRS, DEFAULT_EXTS, DEFAULT_COMMENT_CHARS,
     DEFAULT_SKIP_DIRS, DEFAULT_SKIP_FILES,
     normalize_paths, normalize_exts,
     decode_content, get_language_by_extension, filter_lines
 )
-from code_scanner import collect_code_files, count_total_lines
-from doc_writer import CodeWriter
-from logger import get_logger
+from src.core.code_scanner import collect_code_files, count_total_lines
+from src.core.doc_writer import CodeWriter
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -145,7 +145,7 @@ def generate_code_doc(
             
             # 使用Word COM提取60页
             logger.info("正在使用Word COM提取前30页和后30页...")
-            from word_com_helper import extract_60_pages, check_word_available
+            from src.core.word_com_helper import extract_60_pages, check_word_available
             
             # 检查Word是否可用
             available, error_msg = check_word_available()
@@ -236,7 +236,7 @@ def _try_export_pdf(docx_path, result_dict):
     失败时记录警告而非抛出异常。
     """
     try:
-        from word_com_helper import convert_docx_to_pdf, check_word_available
+        from src.core.word_com_helper import convert_docx_to_pdf, check_word_available
         
         available, error_msg = check_word_available()
         if not available:

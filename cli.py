@@ -1,10 +1,14 @@
-# -*- coding: utf-8 -*-
+import os
+import sys
 import logging
+
+# 将项目根目录添加到 sys.path
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 import click
 
-from code_processor import DEFAULT_COMMENT_CHARS, DEFAULT_EXTS, DEFAULT_INDIRS
-from doc_generator import generate_code_doc
+from src.core.code_processor import DEFAULT_COMMENT_CHARS, DEFAULT_EXTS, DEFAULT_INDIRS
+from src.core.doc_generator import generate_code_doc
 
 
 @click.command(name='ccd')
@@ -112,7 +116,7 @@ def main(
         gui, verbose
 ):
     if gui:
-        from ui_main import launch_gui
+        from src.ui.ui_main import launch_gui
         launch_gui()
         return 0
     if not indirs:

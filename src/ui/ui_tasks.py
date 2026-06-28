@@ -6,10 +6,10 @@ UI后台任务模块
 import os
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from code_processor import normalize_paths, DEFAULT_SKIP_DIRS, DEFAULT_SKIP_FILES
-from code_scanner import collect_code_files, collect_all_file_extensions, count_total_lines
-from doc_generator import generate_code_doc
-from logger import get_logger
+from src.core.code_processor import normalize_paths, DEFAULT_SKIP_DIRS, DEFAULT_SKIP_FILES
+from src.core.code_scanner import collect_code_files, collect_all_file_extensions, count_total_lines
+from src.core.doc_generator import generate_code_doc
+from src.utils.logger import get_logger
 
 
 class GenerateWorker(QThread):
