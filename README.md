@@ -33,7 +33,7 @@
 
 在使用本项目前，请确保您的系统满足以下要求：
 
-*   **Python 核心**：Python 3.8+
+*   **Python 核心**：Python 3.10+
 *   **操作系统**：Windows / macOS / Linux
 *   **高级功能额外要求（60页模式 / PDF 导出）**：
     *   仅支持 Windows 操作系统

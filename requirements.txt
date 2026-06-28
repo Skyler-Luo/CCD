@@ -1,6 +1,6 @@
 click
 python-docx
 PyQt5
-qfluentwidgets
+PyQt-Fluent-Widgets
 scandir
 pywin32
