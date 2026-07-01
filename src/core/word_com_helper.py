@@ -538,3 +538,38 @@ def convert_docx_to_pdf(docx_path, pdf_path=None):
                 pythoncom.CoUninitialize()
             except Exception:
                 pass
+
+
+def check_word_running():
+    """检查后台是否有正在运行的 Word 进程 (winword.exe)"""
+    if sys.platform != 'win32':
+        return False
+    import subprocess
+    try:
+        output_word = subprocess.check_output(
+            'tasklist /FI "IMAGENAME eq winword.exe" /FO CSV /NH',
+            shell=True,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000
+        )
+        return b"winword.exe" in output_word.lower()
+    except Exception:
+        return False
+
+
+def kill_word_process():
+    """强杀后台 Word 进程"""
+    if sys.platform != 'win32':
+        return True
+    import subprocess
+    try:
+        subprocess.check_call(
+            'taskkill /f /im winword.exe', 
+            shell=True, 
+            stdout=subprocess.DEVNULL, 
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000
+        )
+        return True
+    except Exception:
+        return False

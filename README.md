@@ -205,18 +205,20 @@ CCD/
 │   │   ├── doc_writer.py       # Word (python-docx) 段落样式及表格写入
 │   │   └── word_com_helper.py  # Word COM 自动化（60页裁剪与PDF转换）
 │   ├── ui/                     # PyQt5 GUI 图形界面
-│   │   ├── ui_main.py          # Fluent Design 主界面与配置绑定
-│   │   ├── ui_dialogs.py       # 自定义对话框组件（文件管理、日志查看等）
+│   │   ├── dialogs/            # 弹出对话框组件包（后缀选择、文件排序、日志查看等）
+│   │   ├── ui_layout.py        # 静态 UI 界面装配与布局组件
+│   │   ├── ui_main.py          # Fluent Design 主界面控制逻辑与事件映射
 │   │   └── ui_tasks.py         # 异步多线程执行任务（后缀扫描、文档生成工作器）
 │   └── utils/                  # 工具类
-│       └── logger.py           # 日志系统（包含自动轮转和过滤）
+│       ├── logger.py           # 日志系统（包含自动轮转和过滤）
+│       └── theme_utils.py      # 主题样式辅助工具（动态更新 Windows 窗口标题栏样式）
 ├── assets/                     # 静态资源与截图
 │   ├── logo.ico                # 应用程序图标
 │   └── img.png                 # README 界面效果截图
 ├── cli.py                      # 命令行启动入口
 ├── main.py                     # 图形界面启动入口
 ├── requirements.txt            # 项目依赖声明
-├── LICENSE                     # MIT 开源协议书
+├── LICENSE                     # GPLv3 开源协议书
 └── logs/                       # 日志输出文件夹（运行后自动生成）
     ├── ccd.log                 # 完整运行时日志
     └── ccd_error.log           # 错误追踪日志
@@ -231,6 +233,8 @@ CCD/
     *   [extract_60_pages()](file:///e:/Study/ml_projects/CCD/src/core/word_com_helper.py#L39) —— 基于 COM 自动化提取前 30 页和后 30 页。
     *   [convert_docx_to_pdf()](file:///e:/Study/ml_projects/CCD/src/core/word_com_helper.py#L569) —— 高保真 DOCX 转 PDF 格式。
     *   [diagnose_document_pages()](file:///e:/Study/ml_projects/CCD/src/core/word_com_helper.py#L471) —— 辅助诊断当前 Word 文档的页数。
+    *   [check_word_running()](file:///e:/Study/ml_projects/CCD/src/core/word_com_helper.py#L543) —— 检查后台是否有正在运行的 Word 进程。
+    *   [kill_word_process()](file:///e:/Study/ml_projects/CCD/src/core/word_com_helper.py#L560) —— 强杀后台 Word 进程以防独占冲突。
 *   **[src/core/code_processor.py](file:///e:/Study/ml_projects/CCD/src/core/code_processor.py)**：
     *   提供代码编码解析、多行/单行注释的正则表达式过滤逻辑。
 *   **[src/core/doc_writer.py](file:///e:/Study/ml_projects/CCD/src/core/doc_writer.py)**：
@@ -238,14 +242,26 @@ CCD/
 
 #### 2. 对话框与多线程组件
 
-*   **[src/ui/ui_dialogs.py](file:///e:/Study/ml_projects/CCD/src/ui/ui_dialogs.py)**：
-    *   [ExtensionSelectDialog](file:///e:/Study/ml_projects/CCD/src/ui/ui_dialogs.py#L64) —— 弹出式文件后缀选择器。
-    *   [CommentPrefixDialog](file:///e:/Study/ml_projects/CCD/src/ui/ui_dialogs.py#L171) —— 注释前缀详细配置器。
-    *   [FileSelectDialog](file:///e:/Study/ml_projects/CCD/src/ui/ui_dialogs.py#L290) —— 双栏的高级文件筛选与人工排序器。
-    *   [LogViewDialog](file:///e:/Study/ml_projects/CCD/src/ui/ui_dialogs.py#L905) —— 运行时日志控制与实时查看器。
+*   **[src/ui/dialogs/](file:///e:/Study/ml_projects/CCD/src/ui/dialogs/)**：弹出对话框组件包，对外统一接口。
+    *   [ExtensionSelectDialog](file:///e:/Study/ml_projects/CCD/src/ui/dialogs/extension_select.py) —— 弹出式文件后缀选择器。
+    *   [CommentPrefixDialog](file:///e:/Study/ml_projects/CCD/src/ui/dialogs/comment_prefix.py) —— 注释前缀详细配置器。
+    *   [FileSelectDialog](file:///e:/Study/ml_projects/CCD/src/ui/dialogs/file_select.py) —— 双栏的高级文件筛选与人工排序器。
+    *   [LogViewDialog](file:///e:/Study/ml_projects/CCD/src/ui/dialogs/log_view.py) —— 运行时日志控制与实时查看器。
+*   **[src/ui/ui_layout.py](file:///e:/Study/ml_projects/CCD/src/ui/ui_layout.py)**：
+    *   [GeneratorWindowUI](file:///e:/Study/ml_projects/CCD/src/ui/ui_layout.py#L17) —— 主界面静态组件的声明与排版装配。
+*   **[src/ui/ui_main.py](file:///e:/Study/ml_projects/CCD/src/ui/ui_main.py)**：
+    *   [GeneratorWindow](file:///e:/Study/ml_projects/CCD/src/ui/ui_main.py#L39) —— 主窗口控制器，处理配置载入、工作线程绑定以及信号槽事件。
 *   **[src/ui/ui_tasks.py](file:///e:/Study/ml_projects/CCD/src/ui/ui_tasks.py)**：
     *   [GenerateWorker](file:///e:/Study/ml_projects/CCD/src/ui/ui_tasks.py#L15) —— 后台文档生成异步工作线程，避免生成大文件时 GUI 界面卡死。
     *   [ExtensionScanWorker](file:///e:/Study/ml_projects/CCD/src/ui/ui_tasks.py#L92) —— 后台源码目录后缀自动匹配与扫描器。
+    *   [FileInfoWorker](file:///e:/Study/ml_projects/CCD/src/ui/ui_tasks.py#L118) —— 后台文件详细信息（代码行数/大小）异步统计任务。
+
+#### 3. 其他工具
+
+*   **[src/utils/theme_utils.py](file:///e:/Study/ml_projects/CCD/src/utils/theme_utils.py)**：
+    *   [set_window_dark_title_bar()](file:///e:/Study/ml_projects/CCD/src/utils/theme_utils.py#L9) —— 动态设置 Windows 操作系统窗口标题栏样式（暗黑模式 / 浅色模式），并统一标题栏颜色与背景色以实现沉浸式设计。
+*   **[src/utils/logger.py](file:///e:/Study/ml_projects/CCD/src/utils/logger.py)**：
+    *   提供日志系统，记录运行时详细的日志输出，包含自动轮转和过滤。
 
 ## 📄 许可证
 
