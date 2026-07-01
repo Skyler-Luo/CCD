@@ -96,9 +96,14 @@ def generate_code_doc(
         # 按照 selected_files 的顺序，只保留实际存在的文件
         files = [f for f in selected_files if f in available_files_set]
     
-    # 统计总行数
-    total_lines_info = count_total_lines(files, skip_blank_lines, skip_comment_lines, comment_chars, encoding)
-    total_lines = total_lines_info['total_lines']  # 过滤后的总行数
+    # 统计总行数将由 writer.stats 在写入时同步累加，无需在此单独扫描读取
+    total_lines_info = {
+        'total_lines': 0,
+        'code_lines': 0,
+        'comment_lines': 0,
+        'blank_lines': 0,
+        'raw_lines': 0
+    }
     
     writer = CodeWriter(
         command_chars=comment_chars,
@@ -142,6 +147,7 @@ def generate_code_doc(
             for file in files:
                 writer.write_file(file)
             writer.save(temp_path)
+            total_lines_info = writer.stats
             
             # 使用Word COM提取60页
             logger.info("正在使用Word COM提取前30页和后30页...")
@@ -219,6 +225,7 @@ def generate_code_doc(
         for file in files:
             writer.write_file(file)
         writer.save(outfile)
+        total_lines_info = writer.stats
     
     result = {
         'file_count': len(files),

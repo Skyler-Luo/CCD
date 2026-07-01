@@ -10,15 +10,16 @@ import sys
 os.environ['QT_LOGGING_RULES'] = '*.debug=false;qt.qpa.*=false'
 
 from PyQt5.QtCore import QEvent, Qt, QTimer, QUrl
-from PyQt5.QtGui import QDesktopServices, QIcon
+from PyQt5.QtGui import QDesktopServices, QIcon, QFont
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QFileDialog, QScrollArea, QMainWindow, QDialog, QMessageBox
+    QFileDialog, QMainWindow, QDialog, QMessageBox
 )
 from qfluentwidgets import (
     PrimaryPushButton, PushButton, LineEdit, TextEdit,
     DoubleSpinBox, ComboBox, CheckBox, InfoBar, InfoBarPosition,
-    TitleLabel, BodyLabel, CardWidget, setTheme, Theme
+    TitleLabel, BodyLabel, CaptionLabel, StrongBodyLabel, CardWidget,
+    setTheme, Theme, isDarkTheme, ScrollArea, MessageBox
 )
 
 from src.core.code_processor import (
@@ -28,11 +29,11 @@ from src.core.code_processor import (
 from src.ui.ui_tasks import GenerateWorker, ExtensionScanWorker
 from src.ui.ui_dialogs import ExtensionSelectDialog, CommentPrefixDialog, FileSelectDialog, LogViewDialog, COMMENT_PREFIX_BY_LANG
 from src.utils.logger import get_logger
+from src.utils.theme_utils import set_window_dark_title_bar
 
 class GeneratorWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        setTheme(Theme.AUTO)
         self.setWindowTitle('软著源代码文档生成器')
         self.resize(1020, 720)
         
@@ -84,33 +85,49 @@ class GeneratorWindow(QMainWindow):
         self.logger.info('=' * 50)
         
         self._build_ui()
+        setTheme(Theme.AUTO)
+        self.apply_theme_stylesheet()
 
     def _build_ui(self):
         wrapper = QWidget()
+        wrapper.setObjectName("centralWrapper")
         wrapper_layout = QHBoxLayout(wrapper)
         wrapper_layout.setContentsMargins(16, 16, 16, 16)
         wrapper_layout.setSpacing(18)
         self.setCentralWidget(wrapper)
 
-        scroll = QScrollArea()
+        scroll = ScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.enableTransparentBackground()
         self.scroll_area = scroll
         container = QWidget()
+        container.setObjectName("scrollContainer")
         scroll.setWidget(container)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(16)
 
         title = TitleLabel('软件著作权源代码文档生成器')
-        subtitle = BodyLabel('支持多目录扫描、注释过滤、模板与排版参数配置')
-        title.setStyleSheet('font-size: 24px; font-weight: 600;')
-        subtitle.setStyleSheet('font-size: 12px; color: #6b7280;')
+        subtitle = CaptionLabel('支持多目录扫描、注释过滤、模板与排版参数配置')
+        title.setFont(QFont('Microsoft YaHei', 18, QFont.Bold))
+        subtitle.setStyleSheet('font-size: 12px;')
         subtitle.setWordWrap(True)
+        
+        self.theme_label = BodyLabel('主题模式')
+        self.theme_combo = ComboBox()
+        self.theme_combo.addItems(['系统自适应', '浅色模式', '深色模式'])
+        self.theme_combo.blockSignals(True)
+        self.theme_combo.setCurrentText('系统自适应')
+        self.theme_combo.blockSignals(False)
+        self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
+
         header_row = QWidget()
         header_layout = QHBoxLayout(header_row)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.addWidget(title)
         header_layout.addStretch(1)
+        header_layout.addWidget(self.theme_label)
+        header_layout.addWidget(self.theme_combo)
         layout.addWidget(header_row)
         layout.addWidget(subtitle)
 
@@ -292,8 +309,8 @@ class GeneratorWindow(QMainWindow):
         style_group, style_layout = self._create_group('排版设置')
         
         # === 字体设置 ===
-        font_section = BodyLabel('字体设置')
-        font_section.setStyleSheet('font-size: 12px; font-weight: 600; color: #374151; margin-top: 4px;')
+        font_section = StrongBodyLabel('字体设置')
+        font_section.setStyleSheet('font-size: 12px; margin-top: 4px;')
         style_layout.addWidget(font_section)
         
         font_grid = QGridLayout()
@@ -338,8 +355,8 @@ class GeneratorWindow(QMainWindow):
         style_layout.addSpacing(8)
 
         # === 段落设置 ===
-        para_section = BodyLabel('段落设置')
-        para_section.setStyleSheet('font-size: 12px; font-weight: 600; color: #374151;')
+        para_section = StrongBodyLabel('段落设置')
+        para_section.setStyleSheet('font-size: 12px;')
         style_layout.addWidget(para_section)
         
         para_grid = QGridLayout()
@@ -376,8 +393,8 @@ class GeneratorWindow(QMainWindow):
         style_layout.addSpacing(8)
 
         # === 页面边距 ===
-        margin_section = BodyLabel('页面边距')
-        margin_section.setStyleSheet('font-size: 12px; font-weight: 600; color: #374151;')
+        margin_section = StrongBodyLabel('页面边距')
+        margin_section.setStyleSheet('font-size: 12px;')
         style_layout.addWidget(margin_section)
         
         margin_grid = QGridLayout()
@@ -455,8 +472,8 @@ class GeneratorWindow(QMainWindow):
         style_layout.addSpacing(8)
 
         # === 页码格式 ===
-        page_section = BodyLabel('页码格式')
-        page_section.setStyleSheet('font-size: 12px; font-weight: 600; color: #374151;')
+        page_section = StrongBodyLabel('页码格式')
+        page_section.setStyleSheet('font-size: 12px;')
         style_layout.addWidget(page_section)
         
         page_grid = QGridLayout()
@@ -518,11 +535,11 @@ class GeneratorWindow(QMainWindow):
         layout.addWidget(style_group)
 
         summary_group, summary_layout = self._create_group('运行概览')
-        self.summary_title = BodyLabel('尚未执行任务')
-        self.summary_title.setStyleSheet('font-size: 12px; font-weight: 600; color: #374151;')
-        self.summary_body = BodyLabel('')
+        self.summary_title = StrongBodyLabel('尚未执行任务')
+        self.summary_title.setStyleSheet('font-size: 12px;')
+        self.summary_body = CaptionLabel('')
         self.summary_body.setWordWrap(True)
-        self.summary_body.setStyleSheet('font-size: 12px; color: #4b5563;')
+        self.summary_body.setStyleSheet('font-size: 12px;')
         summary_layout.addWidget(self.summary_title)
         summary_layout.addWidget(self.summary_body)
         right_layout.addWidget(summary_group)
@@ -562,9 +579,9 @@ class GeneratorWindow(QMainWindow):
         action_row_layout.addWidget(self.open_output_btn)
         action_row_layout.addWidget(self.view_log_btn)
         action_layout.addWidget(action_row)
-        self.status_label = BodyLabel('')
+        self.status_label = CaptionLabel('')
         self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet('font-size: 12px; color: #4b5563;')
+        self.status_label.setStyleSheet('font-size: 12px;')
         action_layout.addWidget(self.status_label)
         right_layout.addWidget(action_group)
         right_layout.addStretch(1)
@@ -610,7 +627,7 @@ class GeneratorWindow(QMainWindow):
         self.comment_select_btn.clicked.connect(self.open_comment_prefix_dialog)
         self._update_open_output_enabled()
         self._update_summary()
-        for widget in (right_column, summary_group, action_group, self.status_label):
+        for widget in (right_column, summary_group, action_group, self.status_label, self.indirs_edit, self.excludes_edit):
             widget.installEventFilter(self)
     
     def _on_page_number_format_changed(self, text):
@@ -656,8 +673,8 @@ class GeneratorWindow(QMainWindow):
         layout = QVBoxLayout(group)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
-        header = BodyLabel(title)
-        header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
+        header = StrongBodyLabel(title)
+        header.setStyleSheet('font-size: 13px;')
         layout.addWidget(header)
         return group, layout
 
@@ -693,6 +710,7 @@ class GeneratorWindow(QMainWindow):
             self, '选择输出文件', self.outfile_edit.text() or os.getcwd(), 'Word 文档 (*.docx)'
         )
         if file_path:
+            file_path = os.path.normpath(file_path)
             if not file_path.lower().endswith('.docx'):
                 file_path += '.docx'
             self.outfile_edit.setText(file_path)
@@ -702,6 +720,7 @@ class GeneratorWindow(QMainWindow):
             self, '选择模板文件', os.getcwd(), 'Word 文档 (*.docx)'
         )
         if file_path:
+            file_path = os.path.normpath(file_path)
             self.template_edit.setText(file_path)
 
     def open_output_dir(self):
@@ -723,14 +742,26 @@ class GeneratorWindow(QMainWindow):
         dialog.exec_()
 
     def _append_line(self, widget, text):
-        """追加单行文本到widget"""
+        """追加单行文本到widget（格式化为本地路径格式并去重）"""
+        norm_text = os.path.normpath(text.strip())
         current = widget.toPlainText().strip()
-        widget.setText((current + '\n' + text) if current else text)
+        if current:
+            lines = [os.path.normpath(line.strip()) for line in current.splitlines() if line.strip()]
+            if norm_text not in lines:
+                lines.append(norm_text)
+            widget.setText('\n'.join(lines))
+        else:
+            widget.setText(norm_text)
 
     def _append_lines(self, widget, lines):
-        """追加多行文本到widget（去重）"""
-        current = normalize_items(widget.toPlainText())
-        merged = current + [item for item in lines if item not in current]
+        """追加多行文本到widget（格式化为本地路径格式并去重）"""
+        current = [os.path.normpath(item.strip()) for item in normalize_items(widget.toPlainText()) if item.strip()]
+        norm_lines = [os.path.normpath(item.strip()) for item in lines if item.strip()]
+        
+        merged = []
+        for item in current + norm_lines:
+            if item not in merged:
+                merged.append(item)
         widget.setText('\n'.join(merged))
 
     def build_config(self):
@@ -926,6 +957,27 @@ class GeneratorWindow(QMainWindow):
         self.summary_body.setText('\n'.join(summary))
 
     def eventFilter(self, obj, event):
+        if obj in (self.indirs_edit, self.excludes_edit):
+            if event.type() == QEvent.DragEnter:
+                if event.mimeData().hasUrls():
+                    event.acceptProposedAction()
+                    return True
+            elif event.type() == QEvent.DragMove:
+                event.acceptProposedAction()
+                return True
+            elif event.type() == QEvent.Drop:
+                urls = event.mimeData().urls()
+                paths = []
+                for url in urls:
+                    path = os.path.normpath(url.toLocalFile())
+                    if path:
+                        paths.append(path)
+                if paths:
+                    self._append_lines(obj, paths)
+                    self._update_summary()
+                    event.accept()
+                    return True
+
         if event.type() == QEvent.Wheel and hasattr(self, 'scroll_area'):
             bar = self.scroll_area.verticalScrollBar()
             if bar:
@@ -934,6 +986,97 @@ class GeneratorWindow(QMainWindow):
                     bar.setValue(bar.value() - delta)
                     return True
         return super().eventFilter(obj, event)
+
+    def closeEvent(self, event):
+        """窗口关闭事件：确保后台工作线程被正确终止，防止残留后台进程"""
+        self.logger.info('正在关闭窗口，正在清理后台线程...')
+        # 强制停止扫描和生成线程
+        if self.worker and self.worker.isRunning():
+            self.logger.info('终止文档生成后台线程...')
+            self.worker.terminate()
+            self.worker.wait(1000)  # 最多等待 1 秒
+        if self.ext_worker and self.ext_worker.isRunning():
+            self.logger.info('终止后缀扫描后台线程...')
+            self.ext_worker.terminate()
+            self.ext_worker.wait(1000)
+        event.accept()
+
+    def _check_word_conflict(self, config):
+        """（私有辅助方法）检查并处理 Word 进程冲突"""
+        # 仅在启用 60 页模式或导出 PDF 时需要 Word COM
+        if not (config.get('pages_60_mode') or config.get('export_pdf')):
+            return True
+
+        import subprocess
+        
+        # 仅检查 winword.exe 是否运行
+        word_running = False
+        try:
+            output_word = subprocess.check_output(
+                'tasklist /FI "IMAGENAME eq winword.exe" /FO CSV /NH',
+                shell=True,
+                stderr=subprocess.DEVNULL,
+                creationflags=0x08000000
+            )
+            word_running = b"winword.exe" in output_word.lower()
+        except:
+            pass
+
+        if word_running:
+            w = QMessageBox(self)
+            w.setWindowTitle('检测到 Word 正在运行')
+            w.setText('系统检测到后台/前台有正在运行的 Word 进程。\n'
+                      '由于 60 页模式及 PDF 导出依赖 Word COM 自动化，此时运行可能会产生独占访问冲突并导致失败。\n\n'
+                      '建议您先保存当前所有 Word 文档。\n'
+                      ' - 点击【强杀进程】将自动终止后台 Word 进程并继续生成。\n'
+                      ' - 点击【取消生成】以退出，建议您保存文件并手动关闭后重试。')
+            w.setIcon(QMessageBox.Warning)
+            
+            # 适配暗黑/浅色模式的样式，保持与 Fluent 风格大体一致
+            if isDarkTheme():
+                w.setStyleSheet("""
+                    QMessageBox { background-color: rgb(32, 32, 32); color: white; }
+                    QLabel { color: white; font-family: "Microsoft YaHei"; font-size: 13px; }
+                    QPushButton { background-color: rgb(45, 45, 45); color: white; border: 1px solid rgb(60, 60, 60); border-radius: 4px; min-width: 80px; min-height: 28px; font-family: "Microsoft YaHei"; }
+                    QPushButton:hover { background-color: rgb(60, 60, 60); }
+                    QPushButton:pressed { background-color: rgb(35, 35, 35); }
+                """)
+            else:
+                w.setStyleSheet("""
+                    QMessageBox { background-color: rgb(243, 243, 243); color: black; }
+                    QLabel { color: black; font-family: "Microsoft YaHei"; font-size: 13px; }
+                    QPushButton { background-color: white; color: black; border: 1px solid rgb(200, 200, 200); border-radius: 4px; min-width: 80px; min-height: 28px; font-family: "Microsoft YaHei"; }
+                    QPushButton:hover { background-color: rgb(240, 240, 240); }
+                    QPushButton:pressed { background-color: rgb(220, 220, 220); }
+                """)
+                
+            yes_btn = w.addButton('强杀进程', QMessageBox.YesRole)
+            cancel_btn = w.addButton('取消生成', QMessageBox.NoRole)
+            
+            w.exec_()
+            
+            if w.clickedButton() == yes_btn:
+                killed_ok = True
+                try:
+                    subprocess.check_call(
+                        'taskkill /f /im winword.exe', 
+                        shell=True, 
+                        stdout=subprocess.DEVNULL, 
+                        stderr=subprocess.DEVNULL,
+                        creationflags=0x08000000
+                    )
+                except Exception as e:
+                    killed_ok = False
+                
+                if killed_ok:
+                    self._notify('success', '清理完成', '已终止所有后台 Word 进程')
+                    return True
+                else:
+                    self._notify('warning', '清理失败', 'Word 进程无法自动终止。为避免软件卡死，请手动关闭后重试。')
+                    return False  # 强杀失败则不允许继续，防止卡死
+            else:
+                return False  # 取消生成
+        return True
 
     def start_worker(self, mode):
         if self.worker and self.worker.isRunning():
@@ -947,6 +1090,13 @@ class GeneratorWindow(QMainWindow):
         if not config['exts']:
             self._notify('warning', '未选择后缀', '请点击“选择”添加文件后缀')
             return
+        
+        # Word 进程冲突前置检查
+        if mode == 'generate':
+            if not self._check_word_conflict(config):
+                self._notify('info', '已取消', '已取消文档生成')
+                return
+
         self.set_buttons_enabled(False)
         if mode == 'scan':
             self.status_label.setText('正在扫描文件，请稍候...')
@@ -1021,7 +1171,10 @@ class GeneratorWindow(QMainWindow):
         self.summary_title.setText('任务失败')
         self._notify('error', '生成失败', message)
         # 显示错误弹窗
-        QMessageBox.critical(self, '操作失败', f'任务执行失败:\n\n{message}')
+        w = MessageBox('操作失败', f'任务执行失败:\n\n{message}', self)
+        w.exec_()
+        w.hide()
+        w.close()
 
     def set_buttons_enabled(self, enabled):
         self.scan_btn.setEnabled(enabled)
@@ -1096,10 +1249,40 @@ class GeneratorWindow(QMainWindow):
             directory = os.getcwd()
         self.open_output_btn.setEnabled(os.path.isdir(directory))
 
+    def apply_theme_stylesheet(self):
+        """根据主题动态更新主窗口背景样式"""
+        is_dark = isDarkTheme()
+        bg_color = "rgb(32, 32, 32)" if is_dark else "rgb(243, 243, 243)"
+        # 同时作用于主窗口和中央包裹容器，确保背景色深度一致
+        self.setStyleSheet(f"GeneratorWindow, #centralWrapper {{ background-color: {bg_color}; }}")
+        
+        # 动态设置操作系统窗口标题栏样式（暗黑模式 / 浅色模式）
+        set_window_dark_title_bar(self, is_dark)
+        
+        # 确保滚动区域及其内部容器背景透明且能够重绘，防止 QSS 重置导致左侧卡片区保留白色底色
+        if hasattr(self, 'scroll_area') and self.scroll_area:
+            self.scroll_area.enableTransparentBackground()
+            if self.scroll_area.widget():
+                self.scroll_area.widget().setStyleSheet("#scrollContainer { background-color: transparent; }")
+
+    def _on_theme_changed(self, text):
+        """当手动更改主题模式时触发"""
+        if text == '浅色模式':
+            setTheme(Theme.LIGHT)
+        elif text == '深色模式':
+            setTheme(Theme.DARK)
+        else:
+            setTheme(Theme.AUTO)
+        self.apply_theme_stylesheet()
+
 
 def launch_gui():
     """启动GUI应用"""
     app = QApplication(sys.argv)
+    
+    # 设置全局字体以保持默认与浅/深色模式下的字体表现一致
+    app.setFont(QFont("Microsoft YaHei", 9))
+    
     window = GeneratorWindow()
     window.show()
     sys.exit(app.exec_())

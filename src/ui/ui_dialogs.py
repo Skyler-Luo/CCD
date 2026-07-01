@@ -4,20 +4,23 @@ UI对话框模块
 包含所有GUI对话框组件
 """
 import os
-from PyQt5.QtCore import QEvent, Qt, QUrl
-from PyQt5.QtGui import QDesktopServices, QPalette
+from PyQt5.QtCore import QEvent, Qt, QUrl, QTimer, QRegExp
+from PyQt5.QtGui import QDesktopServices, QPalette, QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QDialog, QListWidget, QListWidgetItem,
+    QDialog, QListWidgetItem,
     QAbstractItemView, QDialogButtonBox, QStyle,
-    QStyleOptionViewItem, QMessageBox, QLabel, QComboBox
+    QStyleOptionViewItem, QLabel
 )
 from qfluentwidgets import (
-    PushButton, LineEdit, BodyLabel, PrimaryPushButton, TextEdit
+    PushButton, LineEdit, BodyLabel, PrimaryPushButton, TextEdit,
+    ListWidget, ComboBox, CaptionLabel, StrongBodyLabel, MessageBox,
+    isDarkTheme, TitleLabel, FluentStyleSheet, CardWidget
 )
 
-from src.core.code_processor import LANGUAGE_BY_EXT, decode_content, get_language_by_extension
+from src.core.code_processor import LANGUAGE_BY_EXT, decode_content, get_language_by_extension, filter_lines
 from src.utils.logger import Logger
+from src.utils.theme_utils import set_window_dark_title_bar
 
 # 注释前缀映射
 COMMENT_PREFIX_BY_LANG = {
@@ -49,6 +52,52 @@ COMMENT_PREFIX_BY_LANG = {
 }
 
 
+class CodeHighlighter(QSyntaxHighlighter):
+    """用于代码预览区域的轻量级语法高亮器，支持深浅色模式自动适配"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.highlighting_rules = []
+
+        is_dark = isDarkTheme()
+        
+        # 关键字高亮规则
+        keyword_format = QTextCharFormat()
+        keyword_format.setForeground(QColor("#569CD6" if is_dark else "#007ACC"))
+        keyword_format.setFontWeight(QFont.Bold)
+        keywords = [
+            "class", "def", "function", "var", "let", "const", "if", "else", "for", "while",
+            "return", "import", "from", "as", "public", "private", "protected", "interface",
+            "package", "namespace", "using", "include", "struct", "void", "int", "float",
+            "double", "bool", "char", "string", "func", "fn", "mut", "use", "mod", "pub", 
+            "impl", "trait", "self", "this"
+        ]
+        for word in keywords:
+            rule = (QRegExp(r"\b" + word + r"\b"), keyword_format)
+            self.highlighting_rules.append(rule)
+
+        # 字符串高亮规则
+        string_format = QTextCharFormat()
+        string_format.setForeground(QColor("#CE9178" if is_dark else "#A31515"))
+        self.highlighting_rules.append((QRegExp(r'"[^"\\]*(\\.[^"\\]*)*"'), string_format))
+        self.highlighting_rules.append((QRegExp(r"'[^'\\]*(\\.[^'\\]*)*'"), string_format))
+
+        # 注释高亮规则（绿色）
+        comment_format = QTextCharFormat()
+        comment_format.setForeground(QColor("#6A9955" if is_dark else "#008000"))
+        self.highlighting_rules.append((QRegExp(r"//[^\n]*"), comment_format))
+        self.highlighting_rules.append((QRegExp(r"#[^\n]*"), comment_format))
+        self.highlighting_rules.append((QRegExp(r"--[^\n]*"), comment_format))
+
+    def highlightBlock(self, text):
+        for pattern, format in self.highlighting_rules:
+            expression = QRegExp(pattern)
+            index = expression.indexIn(text)
+            while index >= 0:
+                length = expression.matchedLength()
+                self.setFormat(index, length, format)
+                index = expression.indexIn(text, index + length)
+
+
 def format_file_size(size_bytes):
     """格式化文件大小"""
     if size_bytes < 1024:
@@ -67,25 +116,23 @@ class ExtensionSelectDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('选择文件后缀')
         self.resize(420, 480)
-        self.setAutoFillBackground(True)
-        palette = self.palette()
-        palette.setColor(QPalette.Window, QApplication.palette().color(QPalette.Window))
-        palette.setColor(QPalette.Base, QApplication.palette().color(QPalette.Base))
-        self.setPalette(palette)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        FluentStyleSheet.DIALOG.apply(self)
+        set_window_dark_title_bar(self, isDarkTheme(), 0x002B2B2B if isDarkTheme() else 0x00F3F3F3)
         self.setWindowFlags((self.windowFlags() | Qt.Window) & ~Qt.WindowContextHelpButtonHint)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        header = BodyLabel('可选后缀')
-        header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
+        header = StrongBodyLabel('可选后缀')
+        header.setStyleSheet('font-size: 13px;')
         layout.addWidget(header)
 
-        hint = BodyLabel('请勾选需要提取的后缀')
-        hint.setStyleSheet('font-size: 12px; color: #6b7280;')
+        hint = CaptionLabel('请勾选需要提取的后缀')
+        hint.setStyleSheet('font-size: 12px;')
         layout.addWidget(hint)
 
-        self.list_widget = QListWidget()
+        self.list_widget = ListWidget()
         self.list_widget.setSelectionMode(QAbstractItemView.NoSelection)
         self.list_widget.setAlternatingRowColors(True)
         for ext in exts:
@@ -107,8 +154,8 @@ class ExtensionSelectDialog(QDialog):
         action_layout.addWidget(self.select_all_btn)
         action_layout.addWidget(self.clear_btn)
         action_layout.addStretch(1)
-        self.count_label = BodyLabel('')
-        self.count_label.setStyleSheet('font-size: 12px; color: #4b5563;')
+        self.count_label = CaptionLabel('')
+        self.count_label.setStyleSheet('font-size: 12px;')
         action_layout.addWidget(self.count_label)
         layout.addWidget(action_row)
 
@@ -174,25 +221,23 @@ class CommentPrefixDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('选择注释前缀')
         self.resize(420, 460)
-        self.setAutoFillBackground(True)
-        palette = self.palette()
-        palette.setColor(QPalette.Window, QApplication.palette().color(QPalette.Window))
-        palette.setColor(QPalette.Base, QApplication.palette().color(QPalette.Base))
-        self.setPalette(palette)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        FluentStyleSheet.DIALOG.apply(self)
+        set_window_dark_title_bar(self, isDarkTheme(), 0x002B2B2B if isDarkTheme() else 0x00F3F3F3)
         self.setWindowFlags((self.windowFlags() | Qt.Window) & ~Qt.WindowContextHelpButtonHint)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        header = BodyLabel('按语言选择注释前缀')
-        header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
+        header = StrongBodyLabel('按语言选择注释前缀')
+        header.setStyleSheet('font-size: 13px;')
         layout.addWidget(header)
 
-        hint = BodyLabel('勾选语言后将应用对应的注释前缀')
-        hint.setStyleSheet('font-size: 12px; color: #6b7280;')
+        hint = CaptionLabel('勾选语言后将应用对应的注释前缀')
+        hint.setStyleSheet('font-size: 12px;')
         layout.addWidget(hint)
 
-        self.list_widget = QListWidget()
+        self.list_widget = ListWidget()
         self.list_widget.setSelectionMode(QAbstractItemView.NoSelection)
         self.list_widget.setAlternatingRowColors(True)
         for lang in langs:
@@ -219,8 +264,8 @@ class CommentPrefixDialog(QDialog):
         action_layout.addWidget(self.select_all_btn)
         action_layout.addWidget(self.clear_btn)
         action_layout.addStretch(1)
-        self.count_label = BodyLabel('')
-        self.count_label.setStyleSheet('font-size: 12px; color: #4b5563;')
+        self.count_label = CaptionLabel('')
+        self.count_label.setStyleSheet('font-size: 12px;')
         action_layout.addWidget(self.count_label)
         layout.addWidget(action_row)
 
@@ -293,11 +338,9 @@ class FileSelectDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('选择源文件并排序')
         self.resize(900, 700)
-        self.setAutoFillBackground(True)
-        palette = self.palette()
-        palette.setColor(QPalette.Window, QApplication.palette().color(QPalette.Window))
-        palette.setColor(QPalette.Base, QApplication.palette().color(QPalette.Base))
-        self.setPalette(palette)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        FluentStyleSheet.DIALOG.apply(self)
+        set_window_dark_title_bar(self, isDarkTheme(), 0x002B2B2B if isDarkTheme() else 0x00F3F3F3)
         self.setWindowFlags((self.windowFlags() | Qt.Window) & ~Qt.WindowContextHelpButtonHint)
         
         main_layout = QVBoxLayout(self)
@@ -311,12 +354,12 @@ class FileSelectDialog(QDialog):
         self.encoding = encoding
 
         # 标题和提示
-        header = BodyLabel('选择源文件并排序')
-        header.setStyleSheet('font-size: 14px; font-weight: 600; color: #374151;')
+        header = StrongBodyLabel('选择源文件并排序')
+        header.setStyleSheet('font-size: 14px;')
         main_layout.addWidget(header)
 
-        hint = BodyLabel('从左侧选择文件添加到右侧，可调整右侧文件顺序，支持多选操作')
-        hint.setStyleSheet('font-size: 12px; color: #6b7280;')
+        hint = CaptionLabel('从左侧选择文件添加到右侧，可调整右侧文件顺序，支持多选操作')
+        hint.setStyleSheet('font-size: 12px;')
         main_layout.addWidget(hint)
 
         # 主要内容区域：左右两栏 + 中间按钮
@@ -324,13 +367,13 @@ class FileSelectDialog(QDialog):
         content_layout.setSpacing(12)
         
         # 左栏：可选文件
-        left_panel = QWidget()
+        left_panel = CardWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setContentsMargins(12, 12, 12, 12)
         left_layout.setSpacing(8)
         
-        left_header = BodyLabel('可选文件')
-        left_header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
+        left_header = StrongBodyLabel('可选文件')
+        left_header.setStyleSheet('font-size: 13px;')
         left_layout.addWidget(left_header)
         
         # 排序选项行
@@ -339,11 +382,11 @@ class FileSelectDialog(QDialog):
         sort_layout.setContentsMargins(0, 0, 0, 0)
         sort_layout.setSpacing(8)
         
-        sort_label = BodyLabel('排序:')
-        sort_label.setStyleSheet('font-size: 11px; color: #6b7280;')
+        sort_label = CaptionLabel('排序:')
+        sort_label.setStyleSheet('font-size: 11px;')
         sort_layout.addWidget(sort_label)
         
-        self.sort_combo = QComboBox()
+        self.sort_combo = ComboBox()
         self.sort_combo.addItems(['默认顺序', '按文件名', '按代码行数↓', '按代码行数↑'])
         self.sort_combo.setFixedWidth(120)
         self.sort_combo.currentTextChanged.connect(self._sort_available_files)
@@ -357,15 +400,15 @@ class FileSelectDialog(QDialog):
         self.search_box.textChanged.connect(self._filter_available_files)
         left_layout.addWidget(self.search_box)
         
-        self.available_list = QListWidget()
+        self.available_list = ListWidget()
         self.available_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.available_list.setAlternatingRowColors(True)
         # 禁用自动滚动到选中项
         self.available_list.setAutoScroll(False)
         left_layout.addWidget(self.available_list, 1)
         
-        self.available_count_label = BodyLabel('')
-        self.available_count_label.setStyleSheet('font-size: 11px; color: #6b7280;')
+        self.available_count_label = CaptionLabel('')
+        self.available_count_label.setStyleSheet('font-size: 11px;')
         left_layout.addWidget(self.available_count_label)
         
         content_layout.addWidget(left_panel, 1)
@@ -401,16 +444,16 @@ class FileSelectDialog(QDialog):
         content_layout.addWidget(middle_panel)
         
         # 右栏：已选文件
-        right_panel = QWidget()
+        right_panel = CardWidget()
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setContentsMargins(12, 12, 12, 12)
         right_layout.setSpacing(8)
         
-        right_header = BodyLabel('已选文件（按顺序生成）')
-        right_header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
+        right_header = StrongBodyLabel('已选文件（按顺序生成）')
+        right_header.setStyleSheet('font-size: 13px;')
         right_layout.addWidget(right_header)
         
-        self.selected_list = QListWidget()
+        self.selected_list = ListWidget()
         self.selected_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.selected_list.setAlternatingRowColors(True)
         # 禁用自动滚动到选中项
@@ -434,8 +477,8 @@ class FileSelectDialog(QDialog):
         
         right_layout.addLayout(order_buttons)
         
-        self.selected_count_label = BodyLabel('')
-        self.selected_count_label.setStyleSheet('font-size: 11px; color: #6b7280;')
+        self.selected_count_label = CaptionLabel('')
+        self.selected_count_label.setStyleSheet('font-size: 11px;')
         right_layout.addWidget(self.selected_count_label)
         
         content_layout.addWidget(right_panel, 1)
@@ -443,19 +486,19 @@ class FileSelectDialog(QDialog):
         main_layout.addLayout(content_layout, 1)
         
         # 预览面板
-        preview_panel = QWidget()
+        preview_panel = CardWidget()
         preview_layout = QVBoxLayout(preview_panel)
-        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setContentsMargins(12, 12, 12, 12)
         preview_layout.setSpacing(8)
         
         preview_header_layout = QHBoxLayout()
-        preview_header = BodyLabel('文件预览')
-        preview_header.setStyleSheet('font-size: 13px; font-weight: 600; color: #374151;')
+        preview_header = StrongBodyLabel('文件预览')
+        preview_header.setStyleSheet('font-size: 13px;')
         preview_header_layout.addWidget(preview_header)
         
-        self.preview_lines_label = BodyLabel('预览行数:')
-        self.preview_lines_label.setStyleSheet('font-size: 11px; color: #6b7280;')
-        self.preview_lines_combo = QComboBox()
+        self.preview_lines_label = CaptionLabel('预览行数:')
+        self.preview_lines_label.setStyleSheet('font-size: 11px;')
+        self.preview_lines_combo = ComboBox()
         self.preview_lines_combo.addItems(['20', '50', '100', '200'])
         self.preview_lines_combo.setCurrentText('50')
         self.preview_lines_combo.setFixedWidth(80)
@@ -464,8 +507,8 @@ class FileSelectDialog(QDialog):
         preview_header_layout.addWidget(self.preview_lines_combo)
         preview_header_layout.addStretch(1)
         
-        self.preview_info_label = BodyLabel('')
-        self.preview_info_label.setStyleSheet('font-size: 11px; color: #6b7280;')
+        self.preview_info_label = CaptionLabel('')
+        self.preview_info_label.setStyleSheet('font-size: 11px;')
         preview_header_layout.addWidget(self.preview_info_label)
         
         preview_layout.addLayout(preview_header_layout)
@@ -482,6 +525,9 @@ class FileSelectDialog(QDialog):
         self.preview_text.setFont(preview_font)
         preview_layout.addWidget(self.preview_text)
         
+        # 绑定语法高亮器
+        self.preview_highlighter = CodeHighlighter(self.preview_text.document())
+        
         main_layout.addWidget(preview_panel)
         
         # 底部按钮
@@ -496,6 +542,24 @@ class FileSelectDialog(QDialog):
         self._file_cache = {}  # 缓存文件信息（行数、大小等）
         self._init_file_lists(files, selected_files)
         
+        # 节流更新定时器（避免后台更新过于频繁造成卡顿）
+        self.update_timer = QTimer(self)
+        self.update_timer.setSingleShot(True)
+        self.update_timer.timeout.connect(self._update_counts)
+
+        # 启动后台线程统计文件信息
+        from src.ui.ui_tasks import FileInfoWorker
+        self.loader_worker = FileInfoWorker(
+            files,
+            self.skip_blank_lines,
+            self.skip_comment_lines,
+            self.comment_chars,
+            self.encoding
+        )
+        self.loader_worker.file_processed.connect(self._on_file_processed)
+        self.loader_worker.finished.connect(self._on_loader_finished)
+        self.loader_worker.start()
+
         # 连接信号
         self.add_btn.clicked.connect(self._add_selected)
         self.add_all_btn.clicked.connect(self._add_all)
@@ -513,8 +577,35 @@ class FileSelectDialog(QDialog):
         
         self._update_counts()
     
+    def accept(self):
+        self._stop_worker()
+        super().accept()
+
+    def reject(self):
+        self._stop_worker()
+        super().reject()
+
+    def closeEvent(self, event):
+        self._stop_worker()
+        super().closeEvent(event)
+
+    def _stop_worker(self):
+        if hasattr(self, 'loader_worker') and self.loader_worker and self.loader_worker.isRunning():
+            self.loader_worker.requestInterruption()
+            self.loader_worker.wait()
+
+    def _on_file_processed(self, file_path, info):
+        self._file_cache[file_path] = info
+        self.update_timer.start(100) # 100ms 刷新一次
+
+    def _on_loader_finished(self, cache):
+        self._file_cache.update(cache)
+        self._update_counts()
+        if self.sort_combo.currentText() != '默认顺序':
+            self._sort_available_files()
+    
     def _get_file_info(self, file_path):
-        """获取文件信息（缓存）"""
+        """获取文件信息（缓存），若未命中缓存则同步计算（兜底用）"""
         if file_path in self._file_cache:
             return self._file_cache[file_path]
         
@@ -529,15 +620,10 @@ class FileSelectDialog(QDialog):
         try:
             if os.path.exists(file_path):
                 info['size'] = os.path.getsize(file_path)
-                
-                # 读取内容并计算行数
                 try:
                     content = decode_content(file_path, self.encoding)
                     info['lines'] = len(content.splitlines())
-                    
-                    # 计算过滤后的行数
                     language = get_language_by_extension(file_path)
-                    from code_processor import filter_lines
                     filtered = filter_lines(
                         content, 
                         language, 
@@ -554,31 +640,43 @@ class FileSelectDialog(QDialog):
         
         self._file_cache[file_path] = info
         return info
+
+    def _get_file_info_fast(self, file_path):
+        """快速获取文件信息（无磁盘I/O，若无缓存返回默认空值）"""
+        if file_path in self._file_cache:
+            return self._file_cache[file_path]
+        return {
+            'path': file_path,
+            'name': os.path.basename(file_path),
+            'size': 0,
+            'lines': 0,
+            'filtered_lines': 0
+        }
     
     def _sort_available_files(self):
         """根据选择的排序方式对可选文件列表进行排序"""
         sort_mode = self.sort_combo.currentText()
         
-        # 收集所有可见的文件项
+        # 收集所有可选的文件项 (包含隐藏的)
         items = []
         for i in range(self.available_list.count()):
-            item = self.available_list.item(i)
-            if not item.isHidden():
-                items.append(item.text())
+            items.append(self.available_list.item(i).text())
         
         if not items:
             return
         
         # 根据排序模式排序
-        if sort_mode == '按文件名':
+        if sort_mode == '默认顺序':
+            file_indices = {file: idx for idx, file in enumerate(self.all_files)}
+            items.sort(key=lambda x: file_indices.get(x, 999999))
+        elif sort_mode == '按文件名':
             items.sort(key=lambda x: os.path.basename(x).lower())
         elif sort_mode == '按代码行数↓':
-            # 降序：行数多的在前
-            items.sort(key=lambda x: self._get_file_info(x)['lines'], reverse=True)
+            # 降序：代码行数多的在前，若相同则看总行数，再按文件名排序
+            items.sort(key=lambda x: (self._get_file_info_fast(x)['filtered_lines'], self._get_file_info_fast(x)['lines'], os.path.basename(x).lower()), reverse=True)
         elif sort_mode == '按代码行数↑':
-            # 升序：行数少的在前
-            items.sort(key=lambda x: self._get_file_info(x)['lines'])
-        # '默认顺序' 不排序，保持原顺序
+            # 升序：代码行数少的在前，若相同则看总行数，再按文件名排序
+            items.sort(key=lambda x: (self._get_file_info_fast(x)['filtered_lines'], self._get_file_info_fast(x)['lines'], os.path.basename(x).lower()))
         
         # 清空列表并重新添加排序后的项
         self.available_list.clear()
@@ -587,8 +685,7 @@ class FileSelectDialog(QDialog):
         
         # 应用当前搜索过滤
         search_text = self.search_box.text()
-        if search_text:
-            self._filter_available_files(search_text)
+        self._filter_available_files(search_text)
     
     def _init_file_lists(self, files, selected_files):
         """初始化左右两栏的文件列表"""
@@ -601,13 +698,6 @@ class FileSelectDialog(QDialog):
         for file in files:
             if file not in selected_set:
                 self.available_list.addItem(file)
-        
-        # 预加载文件信息（在后台线程中可以优化，这里简单处理）
-        # 为了不阻塞UI，只预加载前100个文件的信息
-        for i, file in enumerate(files):
-            if i >= 100:
-                break
-            self._get_file_info(file)
     
     def _add_selected(self):
         """将左栏选中的文件添加到右栏"""
@@ -876,7 +966,7 @@ class FileSelectDialog(QDialog):
         total_filtered_lines = 0
         for i in range(selected_count):
             file_path = self.selected_list.item(i).text()
-            info = self._get_file_info(file_path)
+            info = self._get_file_info_fast(file_path)
             total_lines += info['lines']
             total_filtered_lines += info['filtered_lines']
         
@@ -910,18 +1000,15 @@ class LogViewDialog(QDialog):
         # 去掉右上角的问号
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.resize(900, 600)
-        self.setAutoFillBackground(True)
-        palette = self.palette()
-        palette.setColor(QPalette.Window, QApplication.palette().color(QPalette.Window))
-        palette.setColor(QPalette.Base, QApplication.palette().color(QPalette.Base))
-        self.setPalette(palette)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        FluentStyleSheet.DIALOG.apply(self)
+        set_window_dark_title_bar(self, isDarkTheme(), 0x002B2B2B if isDarkTheme() else 0x00F3F3F3)
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
         
         # 标题
-        from qfluentwidgets import TitleLabel, ComboBox
         header = TitleLabel('日志查看')
         layout.addWidget(header)
         
@@ -954,8 +1041,8 @@ class LogViewDialog(QDialog):
         layout.addWidget(type_row)
         
         # 日志信息
-        self.log_info_label = BodyLabel('')
-        self.log_info_label.setStyleSheet('font-size: 11px; color: #6b7280;')
+        self.log_info_label = CaptionLabel('')
+        self.log_info_label.setStyleSheet('font-size: 11px;')
         layout.addWidget(self.log_info_label)
         
         # 日志内容
@@ -1030,24 +1117,36 @@ class LogViewDialog(QDialog):
         if os.path.exists(log_dir):
             QDesktopServices.openUrl(QUrl.fromLocalFile(log_dir))
         else:
-            QMessageBox.warning(self, '目录不存在', f'日志目录不存在:\n{log_dir}')
+            w = MessageBox('目录不存在', f'日志目录不存在:\n{log_dir}', self)
+            w.cancelButton.hide()
+            w.exec_()
+            w.hide()
+            w.close()
     
     def _clear_log(self):
         """清空当前日志文件"""
-        reply = QMessageBox.question(
-            self,
-            '确认清空',
-            '确定要清空当前日志文件吗？此操作不可恢复。',
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+        w = MessageBox('确认清空', '确定要清空当前日志文件吗？此操作不可恢复。', self)
+        w.yesButton.setText('确定')
+        w.cancelButton.setText('取消')
         
-        if reply == QMessageBox.Yes:
+        res = w.exec_()
+        w.hide()
+        w.close()
+        
+        if res:
             log_file = self._get_current_log_file()
             try:
                 with open(log_file, 'w', encoding='utf-8') as f:
                     f.write('')
                 self._load_log()
-                QMessageBox.information(self, '成功', '日志已清空')
+                w_info = MessageBox('成功', '日志已清空', self)
+                w_info.cancelButton.hide()
+                w_info.exec_()
+                w_info.hide()
+                w_info.close()
             except Exception as e:
-                QMessageBox.critical(self, '失败', f'清空日志失败:\n{str(e)}')
+                w_err = MessageBox('失败', f'清空日志失败:\n{str(e)}', self)
+                w_err.cancelButton.hide()
+                w_err.exec_()
+                w_err.hide()
+                w_err.close()

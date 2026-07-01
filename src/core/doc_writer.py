@@ -5,7 +5,7 @@
 """
 from src.core.code_processor import (
     DEFAULT_COMMENT_CHARS, decode_content,
-    get_language_by_extension, filter_lines
+    get_language_by_extension, filter_lines, strip_comments
 )
 from docx.oxml.ns import qn
 
@@ -114,6 +114,13 @@ class CodeWriter:
             section.footer_distance = Cm(footer_distance) # 页脚距离页面底端
         
         self.total_lines = 0
+        self.stats = {
+            'total_lines': 0,
+            'code_lines': 0,
+            'comment_lines': 0,
+            'blank_lines': 0,
+            'raw_lines': 0
+        }
 
     @staticmethod
     def is_blank_line(line):
@@ -398,6 +405,37 @@ class CodeWriter:
         """将单个文件内容按行追加到文档中"""
         content = decode_content(file, self.encoding)
         language = get_language_by_extension(file)
+        
+        # 统计原始行数与各种类型的行数
+        raw_file_lines = content.splitlines()
+        self.stats['raw_lines'] += len(raw_file_lines)
+        
+        if language:
+            stripped = strip_comments(content, language)
+            stripped_lines = stripped.splitlines()
+            
+            # 统计空行
+            file_blank = 0
+            for line in raw_file_lines:
+                if not line.strip():
+                    file_blank += 1
+            self.stats['blank_lines'] += file_blank
+            
+            # 统计代码行和注释行
+            lines_after_comment_removal = len([l for l in stripped_lines if l.strip()])
+            file_comment = len(raw_file_lines) - lines_after_comment_removal - file_blank
+            self.stats['comment_lines'] += file_comment
+            self.stats['code_lines'] += lines_after_comment_removal
+        else:
+            for line in raw_file_lines:
+                stripped = line.strip()
+                if not stripped:
+                    self.stats['blank_lines'] += 1
+                elif any(stripped.startswith(ch) for ch in self.command_chars):
+                    self.stats['comment_lines'] += 1
+                else:
+                    self.stats['code_lines'] += 1
+        
         lines = filter_lines(
             content, language,
             self.skip_blank_lines,
@@ -415,6 +453,8 @@ class CodeWriter:
             # 同时设置东亚字体，避免中文字符回退到默认字体导致混排
             run._element.rPr.rFonts.set(qn('w:eastAsia'), self.font_name)
             self.total_lines += 1
+            
+        self.stats['total_lines'] = self.total_lines
         return self
     
     def get_total_lines(self):

@@ -120,7 +120,9 @@ def read_gitignore_excludes(indirs):
         root = abspath(indir)
         if not os.path.isdir(root):
             continue
-        for current_root, _, files in os.walk(root):
+        for current_root, dirs, files in os.walk(root):
+            # 过滤掉不需要遍历的目录以优化性能，例如 .git, node_modules 等
+            dirs[:] = [d for d in dirs if d not in DEFAULT_SKIP_DIRS and not d.startswith('.')]
             if '.gitignore' not in files:
                 continue
             gitignore_path = os.path.join(current_root, '.gitignore')

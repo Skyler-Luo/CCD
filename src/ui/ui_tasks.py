@@ -113,3 +113,60 @@ class ExtensionScanWorker(QThread):
             error_msg = str(exc)
             self.logger.error(f'后缀扫描失败: {error_msg}', exc_info=True)
             self.failed.emit(error_msg)
+
+
+class FileInfoWorker(QThread):
+    """文件详细信息异步统计任务（用于文件选择对话框）"""
+    file_processed = pyqtSignal(str, dict)
+    finished = pyqtSignal(dict)
+
+    def __init__(self, files, skip_blank_lines, skip_comment_lines, comment_chars, encoding):
+        super().__init__()
+        self.files = files
+        self.skip_blank_lines = skip_blank_lines
+        self.skip_comment_lines = skip_comment_lines
+        self.comment_chars = comment_chars
+        self.encoding = encoding
+        self.logger = get_logger('FileInfoWorker')
+
+    def run(self):
+        self.logger.info(f'开始异步统计 {len(self.files)} 个文件信息')
+        cache = {}
+        for file_path in self.files:
+            if self.isInterruptionRequested():
+                self.logger.info('收到中断请求，停止统计')
+                break
+            try:
+                from src.core.code_processor import decode_content, get_language_by_extension, filter_lines
+                info = {
+                    'path': file_path,
+                    'name': os.path.basename(file_path),
+                    'size': os.path.getsize(file_path) if os.path.exists(file_path) else 0,
+                    'lines': 0,
+                    'filtered_lines': 0
+                }
+                if os.path.exists(file_path):
+                    content = decode_content(file_path, self.encoding)
+                    info['lines'] = len(content.splitlines())
+                    language = get_language_by_extension(file_path)
+                    filtered = filter_lines(
+                        content,
+                        language,
+                        self.skip_blank_lines,
+                        self.skip_comment_lines,
+                        self.comment_chars
+                    )
+                    info['filtered_lines'] = len(filtered)
+            except Exception as e:
+                self.logger.error(f'处理文件出错 {file_path}: {e}')
+                info = {
+                    'path': file_path,
+                    'name': os.path.basename(file_path),
+                    'size': 0,
+                    'lines': 0,
+                    'filtered_lines': 0
+                }
+            cache[file_path] = info
+            self.file_processed.emit(file_path, info)
+        self.finished.emit(cache)
+

@@ -38,7 +38,7 @@ def check_word_available():
 
 def extract_60_pages(input_docx, output_docx):
     """
-    从Word文档中提取前30页和后30页，生成新的60页文档
+    原地从Word文档中提取前30页和后30页，微调生成新的60页文档，无需依赖剪贴板复制粘贴
     
     Args:
         input_docx: 输入的完整文档路径
@@ -50,399 +50,252 @@ def extract_60_pages(input_docx, output_docx):
             - total_pages: 原文档总页数
             - output_pages: 输出文档页数
             - message: 操作信息
-            
-    Raises:
-        RuntimeError: 当Word不可用时
     """
     available, error_msg = check_word_available()
     if not available:
         raise RuntimeError(error_msg)
     
+    import pythoncom
     import win32com.client
     
-    # Word常量定义（手动定义避免依赖问题）
+    # Word常量定义
     wdStatisticPages = 2
     wdGoToPage = 1
     wdGoToAbsolute = 1
     wdStory = 6
     wdHeaderFooterPrimary = 1
-    wdLineSpaceSingle = 0
     
     word = None
     doc = None
-    temp_doc = None
+    com_initialized = False
     
     try:
-        logger.info(f"启动Word应用程序...")
-        # 创建Word应用程序对象
-        word = win32com.client.Dispatch("Word.Application")
+        # 初始化 COM 为 MTA 模式，避免 Word 占用时弹出无法关闭的 Server Busy 弹窗导致卡死
+        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
+        com_initialized = True
+        import shutil
+        input_docx = os.path.abspath(input_docx)
+        output_docx = os.path.abspath(output_docx)
+        
+        # 第一步：直接把原文档拷贝至目标路径，转为原地操作
+        logger.info(f"直接复制原文档到输出路径进行原地裁剪...")
+        shutil.copy2(input_docx, output_docx)
+        
+        logger.info(f"以 DispatchEx 独立进程启动 Word 应用程序...")
+        word = win32com.client.DispatchEx("Word.Application")
         word.Visible = False  # 不显示Word窗口
         word.DisplayAlerts = False  # 不显示警告
         
-        # 打开文档
-        logger.info(f"打开文档: {input_docx}")
-        input_docx = os.path.abspath(input_docx)
-        doc = word.Documents.Open(input_docx)
+        # 打开输出文档
+        logger.info(f"打开文档: {output_docx}")
+        doc = word.Documents.Open(output_docx)
         
-        # 强制重新计算分页
+        # 重新分页计算
         doc.Repaginate()
-        
-        # 获取总页数
         total_pages = doc.ComputeStatistics(wdStatisticPages)
-        logger.info(f"文档总页数: {total_pages}")
+        logger.info(f"原文档总页数: {total_pages}")
         
-        # 如果少于60页，直接复制
+        # 若总页数少于或等于60页，无需裁剪，直接返回
         if total_pages <= 60:
-            logger.info(f"文档只有{total_pages}页，无需提取，直接复制")
-            doc.Close(False)
+            logger.info(f"原文档只有 {total_pages} 页，无需裁剪提取，直接结束")
+            doc.Close(True)
             doc = None
-            
-            # 复制文件
-            import shutil
-            shutil.copy2(input_docx, output_docx)
-            
             return {
                 'success': True,
                 'total_pages': total_pages,
                 'output_pages': total_pages,
-                'message': f'文档只有{total_pages}页，已直接复制'
+                'message': f'文档只有{total_pages}页，已直接保留'
             }
         
-        # 创建新文档
-        logger.info("创建新文档用于存放前30页和后30页...")
-        temp_doc = word.Documents.Add()
+        # 1. 精确删除中间超出前30和后30页的范围
+        delete_start_page = 31
+        delete_end_page = total_pages - 29
         
-        # 复制页眉页脚设置 - 简单复制，稍后统一处理
-        logger.info("复制页眉页脚...")
-        for i in range(1, min(doc.Sections.Count, temp_doc.Sections.Count) + 1):
-            try:
-                # 复制页眉
-                source_header = doc.Sections(i).Headers(wdHeaderFooterPrimary)
-                target_header = temp_doc.Sections(i).Headers(wdHeaderFooterPrimary)
-                
-                if source_header.Range.Text.strip():
-                    source_header.Range.Copy()
-                    target_header.Range.Select()
-                    word.Selection.Paste()
-                
-                # 复制页脚
-                source_footer = doc.Sections(i).Footers(wdHeaderFooterPrimary)
-                target_footer = temp_doc.Sections(i).Footers(wdHeaderFooterPrimary)
-                
-                if source_footer.Range.Text.strip():
-                    source_footer.Range.Copy()
-                    target_footer.Range.Select()
-                    word.Selection.Paste()
-            except Exception as e:
-                logger.warning(f"复制第 {i} 节页眉页脚时出错: {str(e)}")
-                # 继续处理其他节
-                continue
+        logger.info(f"进行原地裁剪：删除第 {delete_start_page} 页起始到第 {delete_end_page} 页起始之间的内容")
         
-        # 第一步：复制前30页 - 一次性复制，但使用精确的页面范围
-        logger.info("复制前30页...")
-        
-        if total_pages > 30:
-            # 获取第1页起始位置（通常是0）
-            doc.Range(0, 0).Select()
-            word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=1)
-            page1_start = word.Selection.Start
-            
-            # 获取第31页起始位置
-            word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=31)
-            page31_start = word.Selection.Start
-            
-            # 选择第1页到第30页的所有内容（不包括第31页）
-            # 使用 page31_start 作为结束位置，让Word自动处理边界
-            first_30_range = doc.Range(page1_start, page31_start)
-            first_30_range.Select()
-            logger.info(f"选择前30页范围: {page1_start} 到 {page31_start}")
-            
-            # 复制并粘贴
-            word.Selection.Copy()
-            temp_doc.Range(0, 0).Select()
-            word.Selection.Paste()
-        else:
-            # 如果不超过30页，选择全部
-            doc.Range(0, 0).Select()
-            word.Selection.EndKey(Unit=wdStory, Extend=1)
-            word.Selection.Copy()
-            temp_doc.Range(0, 0).Select()
-            word.Selection.Paste()
-        
-        # 检查粘贴后的页数并修正
-        temp_doc.Repaginate()
-        pages_after_first = temp_doc.ComputeStatistics(wdStatisticPages)
-        logger.info(f"复制前30页后，新文档页数: {pages_after_first}")
-        
-        # 如果超过30页，删除多余的页
-        if pages_after_first > 30:
-            logger.info(f"检测到多余的 {pages_after_first - 30} 页，正在删除...")
-            # 定位到第31页
-            temp_doc.Range().Select()
-            word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=31)
-            page31_in_temp = word.Selection.Start
-            
-            # 删除从第31页到文档末尾的所有内容
-            temp_doc.Range().Select()
-            word.Selection.EndKey(Unit=wdStory)
-            doc_end_in_temp = word.Selection.End
-            
-            if page31_in_temp < doc_end_in_temp:
-                temp_doc.Range(page31_in_temp, doc_end_in_temp).Delete()
-                temp_doc.Repaginate()
-                pages_after_first = temp_doc.ComputeStatistics(wdStatisticPages)
-                logger.info(f"删除后页数: {pages_after_first}")
-        
-        # 第二步：复制后30页 - 但要多复制几页以确保最后一页有足够内容
-        logger.info("复制后30页...")
-        
-        # 计算后30页的起始页码，但实际多复制3-5页
-        # 这样即使重新分页损失几页，也能保证有足够内容
-        extra_pages = 5  # 额外多复制5页作为缓冲
-        start_page = total_pages - 29 - extra_pages  # 往前多取5页
-        logger.info(f"为确保内容充足，实际复制第 {start_page} 页到第 {total_pages} 页（共 {total_pages - start_page + 1} 页）")
-        
-        # 获取后30+页起始位置
+        # 定位起始与结束偏移位置
         doc.Range(0, 0).Select()
-        word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=start_page)
-        last_pages_start = word.Selection.Start
+        word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=delete_start_page)
+        delete_start_pos = word.Selection.Start
         
-        # 获取文档末尾位置
-        doc.Range(0, 0).Select()
-        word.Selection.EndKey(Unit=wdStory)
-        doc_end = word.Selection.End
+        word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=delete_end_page)
+        delete_end_pos = word.Selection.Start
         
-        # 选择并复制
-        doc.Range(last_pages_start, doc_end).Select()
-        word.Selection.Copy()
+        if delete_start_pos < delete_end_pos:
+            doc.Range(delete_start_pos, delete_end_pos).Delete()
         
-        # 粘贴到新文档末尾
-        temp_doc.Range().Select()
-        word.Selection.EndKey(Unit=wdStory)
-        word.Selection.Paste()
+        # 再次强制重新分页计算
+        doc.Repaginate()
+        actual_pages = doc.ComputeStatistics(wdStatisticPages)
+        logger.info(f"原地初次裁剪后实际页数: {actual_pages}")
         
-        # 检查粘贴后的总页数
-        temp_doc.Repaginate()
-        pages_after_paste = temp_doc.ComputeStatistics(wdStatisticPages)
-        logger.info(f"粘贴后新文档总页数: {pages_after_paste}")
-        
-        # 保存新文档
-        logger.info(f"保存新文档: {output_docx}")
-        output_docx = os.path.abspath(output_docx)
-        temp_doc.SaveAs2(output_docx)
-        
-        # 先计算保存后的页数
-        temp_doc.Repaginate()
-        output_pages_before_clean = temp_doc.ComputeStatistics(wdStatisticPages)
-        logger.info(f"清理前文档页数: {output_pages_before_clean}")
-        
-        # 清理页眉页脚中的多余段落
-        logger.info("清理页眉页脚中的多余段落...")
-        cleaned_count = 0
-        for i in range(1, temp_doc.Sections.Count + 1):
-            section = temp_doc.Sections(i)
+        # 2. 动态页数对齐微调
+        if actual_pages > 60:
+            pages_to_remove = actual_pages - 60
+            logger.info(f"微调：裁剪后有 {actual_pages} 页，再次删除中间多余的 {pages_to_remove} 页")
+            _delete_document_range(word, doc, 31, 30 + pages_to_remove)
+            doc.Repaginate()
+            actual_pages = doc.ComputeStatistics(wdStatisticPages)
+            logger.info(f"微调后页数: {actual_pages}")
             
-            # 清理页眉
-            header = section.Headers(wdHeaderFooterPrimary)
-            if header.Range.Paragraphs.Count > 1:
-                para_count = header.Range.Paragraphs.Count
-                for j in range(para_count, 1, -1):  # 从后往前删
-                    para = header.Range.Paragraphs(j)
-                    if len(para.Range.Text.strip()) == 0:
-                        para.Range.Delete()
-                        cleaned_count += 1
+        elif actual_pages < 60:
+            pages_needed = 60 - actual_pages
+            logger.info(f"微调：裁剪后仅有 {actual_pages} 页，需要从原文档补充中间区域 {pages_needed} 页")
+            _insert_middle_pages_fallback(word, doc, input_docx, pages_needed)
+            doc.Repaginate()
+            actual_pages = doc.ComputeStatistics(wdStatisticPages)
+            logger.info(f"补充微调后页数: {actual_pages}")
             
-            # 清理页脚
-            footer = section.Footers(wdHeaderFooterPrimary)
-            if footer.Range.Paragraphs.Count > 1:
-                para_count = footer.Range.Paragraphs.Count
-                for j in range(para_count, 1, -1):  # 从后往前删
-                    para = footer.Range.Paragraphs(j)
-                    if len(para.Range.Text.strip()) == 0:
-                        para.Range.Delete()
-                        cleaned_count += 1
+        # 3. 清理空段落和多余分页符以校准行格式
+        logger.info("开始清理文档格式垃圾...")
+        _clean_header_footer_paragraphs(doc, wdHeaderFooterPrimary)
+        _clean_document_breaks(word, doc, wdStory)
         
-        logger.info(f"清理了 {cleaned_count} 个空段落")
+        # 终存与统计最终页数
+        doc.Save()
+        doc.Repaginate()
+        output_pages = doc.ComputeStatistics(wdStatisticPages)
         
-        # 清理文档末尾的空白页
-        logger.info("检查并清理文档末尾空白页...")
-        doc_content = temp_doc.Content
-        doc_content.Select()
-        word.Selection.EndKey(Unit=wdStory)
-        
-        # 删除末尾的空段落和分页符
-        removed_empty = 0
-        while True:
-            # 移到最后一个字符
-            word.Selection.EndKey(Unit=wdStory)
-            
-            # 向前选择一个字符
-            word.Selection.MoveStart(Unit=5, Count=-1)  # 5 = wdCharacter
-            
-            selected_text = word.Selection.Text
-            # 如果是空白字符、段落标记或分页符，删除
-            if selected_text in ['\r', '\n', '\r\n', '\f', '\x0c', ' ', '\t'] or len(selected_text.strip()) == 0:
-                word.Selection.Delete()
-                removed_empty += 1
-                if removed_empty > 100:  # 防止无限循环
-                    break
-            else:
-                break
-        
-        if removed_empty > 0:
-            logger.info(f"清理了 {removed_empty} 个末尾空白字符")
-        
-        # 重新保存清理后的文档
-        logger.info("保存清理后的文档...")
-        temp_doc.Save()
-        
-        # 关闭文档
-        temp_doc.Close(False)
-        temp_doc = None
-        doc.Close(False)
+        doc.Close(True)
         doc = None
         
-        # 重新打开文档验证实际页数
-        logger.info("重新打开文档验证实际页数...")
-        verification_doc = word.Documents.Open(output_docx)
-        verification_doc.Repaginate()
-        actual_pages = verification_doc.ComputeStatistics(wdStatisticPages)
-        logger.info(f"验证后实际页数: {actual_pages}")
-        
-        # 调整到精确60页
-        if actual_pages > 60:
-            # 超过60页，从前面删除多余的页（保留最后的代码结束部分）
-            pages_to_remove = actual_pages - 60
-            logger.info(f"文档有 {actual_pages} 页，需要删除前面多余的 {pages_to_remove} 页")
-            
-            # 删除第31页开始的多余页面（在前30页之后删除）
-            delete_start_page = 31
-            delete_end_page = 30 + pages_to_remove
-            
-            logger.info(f"删除第 {delete_start_page} 页到第 {delete_end_page} 页")
-            
-            # 定位到要删除的起始页
-            verification_doc.Range().Select()
-            word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=delete_start_page)
-            delete_start_pos = word.Selection.Start
-            
-            # 定位到要删除的结束页的下一页
-            verification_doc.Range().Select()
-            word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=delete_end_page + 1)
-            delete_end_pos = word.Selection.Start
-            
-            # 删除范围
-            if delete_start_pos < delete_end_pos:
-                verification_doc.Range(delete_start_pos, delete_end_pos).Delete()
-                verification_doc.Save()
-                verification_doc.Repaginate()
-                actual_pages = verification_doc.ComputeStatistics(wdStatisticPages)
-                logger.info(f"删除后页数: {actual_pages}")
-        
-        elif actual_pages < 60:
-            # 少于60页，在第31页位置插入中间内容
-            pages_needed = 60 - actual_pages
-            logger.info(f"文档只有 {actual_pages} 页，需要补充 {pages_needed} 页")
-            
-            # 重新打开原文档
-            doc = word.Documents.Open(input_docx)
-            
-            # 从中间区域选择内容（第31页开始）
-            middle_start = 31
-            fill_end_page = middle_start + pages_needed - 1
-            
-            logger.info(f"从原文档第 {middle_start} 页到第 {fill_end_page} 页补充内容")
-            
-            # 获取补充内容范围
-            doc.Range(0, 0).Select()
-            word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=middle_start)
-            fill_start_pos = word.Selection.Start
-            
-            doc.Range(0, 0).Select()
-            word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=fill_end_page + 1)
-            fill_end_pos = word.Selection.Start
-            
-            # 复制内容
-            doc.Range(fill_start_pos, fill_end_pos).Select()
-            word.Selection.Copy()
-            
-            # 插入到新文档第31页位置（前30页之后）
-            verification_doc.Range().Select()
-            word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=31)
-            word.Selection.Paste()
-            
-            doc.Close(False)
-            doc = None
-            
-            # 保存并验证
-            verification_doc.Save()
-            verification_doc.Repaginate()
-            actual_pages = verification_doc.ComputeStatistics(wdStatisticPages)
-            logger.info(f"补充后页数: {actual_pages}")
-            
-            # 如果补充后超过60页，删除多余部分
-            if actual_pages > 60:
-                logger.info(f"补充后超过60页，删除第61页及之后的 {actual_pages - 60} 页")
-                verification_doc.Range().Select()
-                word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=61)
-                page61_pos = word.Selection.Start
-                
-                verification_doc.Range().Select()
-                word.Selection.EndKey(Unit=wdStory)
-                end_pos = word.Selection.End
-                
-                if page61_pos < end_pos:
-                    verification_doc.Range(page61_pos, end_pos).Delete()
-                    verification_doc.Save()
-                    verification_doc.Repaginate()
-                    actual_pages = verification_doc.ComputeStatistics(wdStatisticPages)
-                    logger.info(f"最终页数: {actual_pages}")
-        
-        verification_doc.Close(False)
-        verification_doc = None
-        
-        output_pages = actual_pages
-        
-        logger.info(f"成功生成60页文档，实际页数: {output_pages}")
+        logger.info(f"原地裁剪文档成功！最终页数: {output_pages}")
         
         if output_pages != 60:
-            logger.warning(f"警告：生成的文档有 {output_pages} 页，不是预期的60页（差异：{60 - output_pages}页）")
-        
+            logger.warning(f"警告：生成的文档实际为 {output_pages} 页，不是预期的60页")
+            
         return {
             'success': True,
             'total_pages': total_pages,
             'output_pages': output_pages,
-            'message': f'成功从{total_pages}页文档中提取前30页和后30页'
+            'message': f'成功从{total_pages}页文档中原地提取前30页和后30页并完成校正'
         }
         
     except Exception as e:
-        logger.error(f"Word COM操作失败: {str(e)}", exc_info=True)
+        logger.error(f"原地裁剪 Word COM 操作失败: {str(e)}", exc_info=True)
         return {
             'success': False,
             'total_pages': 0,
             'output_pages': 0,
-            'message': f'操作失败: {str(e)}'
+            'message': f'原地操作失败: {str(e)}'
         }
         
     finally:
-        # 清理资源
-        try:
-            if temp_doc:
-                temp_doc.Close(False)
-        except:
-            pass
-        
         try:
             if doc:
                 doc.Close(False)
         except:
             pass
-        
         try:
             if word:
                 word.Quit()
         except:
             pass
+        if com_initialized:
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
+
+
+def _delete_document_range(word, doc, start_page, end_page):
+    """（私有辅助方法）原地删除文档中指定页码范围的内容"""
+    wdGoToPage = 1
+    wdGoToAbsolute = 1
+    
+    doc.Range(0, 0).Select()
+    word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=start_page)
+    start_pos = word.Selection.Start
+    
+    word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=end_page + 1)
+    end_pos = word.Selection.Start
+    
+    if start_pos < end_pos:
+        doc.Range(start_pos, end_pos).Delete()
+
+
+def _insert_middle_pages_fallback(word, doc, input_docx, pages_needed):
+    """（私有辅助方法）从原文档拷贝指定数量 of 页码并插入到当前文档第31页位置"""
+    wdGoToPage = 1
+    wdGoToAbsolute = 1
+    
+    # 重新打开原文档读取
+    source_doc = word.Documents.Open(input_docx, ReadOnly=True)
+    try:
+        middle_start = 31
+        fill_end_page = middle_start + pages_needed - 1
+        
+        logger.info(f"从只读原文档第 {middle_start} 页到第 {fill_end_page} 页读取内容并拷贝...")
+        source_doc.Range(0, 0).Select()
+        word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=middle_start)
+        fill_start_pos = word.Selection.Start
+        
+        word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=fill_end_page + 1)
+        fill_end_pos = word.Selection.Start
+        
+        # 拷贝
+        if fill_start_pos < fill_end_pos:
+            source_doc.Range(fill_start_pos, fill_end_pos).Select()
+            word.Selection.Copy()
+            
+            # 粘贴到裁剪文档第31页起始位置
+            doc.Range(0, 0).Select()
+            word.Selection.GoTo(What=wdGoToPage, Which=wdGoToAbsolute, Count=31)
+            word.Selection.Paste()
+    finally:
+        source_doc.Close(False)
+
+
+def _clean_header_footer_paragraphs(doc, wdHeaderFooterPrimary=1):
+    """（私有辅助方法）清扫节页眉页脚中由于操作残留的空白空行"""
+    cleaned_count = 0
+    for i in range(1, doc.Sections.Count + 1):
+        section = doc.Sections(i)
+        
+        # 清理页眉
+        header = section.Headers(wdHeaderFooterPrimary)
+        if header.Range.Paragraphs.Count > 1:
+            para_count = header.Range.Paragraphs.Count
+            for j in range(para_count, 1, -1):
+                para = header.Range.Paragraphs(j)
+                if len(para.Range.Text.strip()) == 0:
+                    para.Range.Delete()
+                    cleaned_count += 1
+        
+        # 清理页脚
+        footer = section.Footers(wdHeaderFooterPrimary)
+        if footer.Range.Paragraphs.Count > 1:
+            para_count = footer.Range.Paragraphs.Count
+            for j in range(para_count, 1, -1):
+                para = footer.Range.Paragraphs(j)
+                if len(para.Range.Text.strip()) == 0:
+                    para.Range.Delete()
+                    cleaned_count += 1
+    logger.info(f"共清扫页眉页脚中 {cleaned_count} 个多余空白段落")
+
+
+def _clean_document_breaks(word, doc, wdStory=6):
+    """（私有辅助方法）检查并清理裁剪后文档末尾的多余空白分页符与回车标记"""
+    removed_empty = 0
+    doc_content = doc.Content
+    doc_content.Select()
+    word.Selection.EndKey(Unit=wdStory)
+    
+    while True:
+        word.Selection.EndKey(Unit=wdStory)
+        word.Selection.MoveStart(Unit=5, Count=-1) # 5 = wdCharacter
+        selected_text = word.Selection.Text
+        
+        if selected_text in ['\r', '\n', '\r\n', '\f', '\x0c', ' ', '\t'] or len(selected_text.strip()) == 0:
+            word.Selection.Delete()
+            removed_empty += 1
+            if removed_empty > 100:  # 保护机制防止死循环
+                break
+        else:
+            break
+            
+    if removed_empty > 0:
+        logger.info(f"共清理末尾空白及分页符 {removed_empty} 次")
 
 
 def test_word_com():
@@ -610,8 +463,8 @@ def convert_docx_to_pdf(docx_path, pdf_path=None):
     com_initialized = False
     
     try:
-        # 在子线程中需要初始化 COM
-        pythoncom.CoInitialize()
+        # 在子线程中需要初始化 COM (MTA 模式，避免 Word 占用时弹出无法关闭的 Server Busy 弹窗导致卡死)
+        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
         com_initialized = True
         
         logger.info(f"启动 Word 进行 PDF 转换...")

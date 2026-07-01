@@ -100,6 +100,46 @@ from src.core.doc_generator import generate_code_doc
     help='页码对齐方式，默认为右对齐'
 )
 @click.option(
+    '--pages-60-mode', is_flag=True,
+    help='是否启用60页模式（前30页+后30页）'
+)
+@click.option(
+    '--top-margin', default=2.5, type=float,
+    help='上边距 (cm)，默认2.5'
+)
+@click.option(
+    '--bottom-margin', default=2.5, type=float,
+    help='下边距 (cm)，默认2.5'
+)
+@click.option(
+    '--left-margin', default=2.5, type=float,
+    help='左边距 (cm)，默认2.5'
+)
+@click.option(
+    '--right-margin', default=2.5, type=float,
+    help='右边距 (cm)，默认2.5'
+)
+@click.option(
+    '--header-distance', default=1.5, type=float,
+    help='页眉距离顶端距离 (cm)，默认1.5'
+)
+@click.option(
+    '--footer-distance', default=1.75, type=float,
+    help='页脚距离底端距离 (cm)，默认1.75'
+)
+@click.option(
+    '--header-font', default='宋体',
+    help='页眉和页脚字体，默认宋体'
+)
+@click.option(
+    '--header-font-size', default=10.5, type=float,
+    help='页眉和页脚字号，默认10.5'
+)
+@click.option(
+    '--page-number-format', default='{page}',
+    help='页码格式，默认为 {page}'
+)
+@click.option(
     '--gui', is_flag=True,
     help='启动图形界面'
 )
@@ -113,6 +153,9 @@ def main(
         encoding, keep_blank_lines,
         keep_comment_lines, pdf,
         header_title_align, page_number_position, page_number_align,
+        pages_60_mode, top_margin, bottom_margin, left_margin, right_margin,
+        header_distance, footer_distance, header_font, header_font_size,
+        page_number_format,
         gui, verbose
 ):
     if gui:
@@ -146,7 +189,17 @@ def main(
         export_pdf=pdf,
         header_title_align=header_title_align,
         page_number_position=page_number_position,
-        page_number_align=page_number_align
+        page_number_align=page_number_align,
+        pages_60_mode=pages_60_mode,
+        top_margin=top_margin,
+        bottom_margin=bottom_margin,
+        left_margin=left_margin,
+        right_margin=right_margin,
+        header_distance=header_distance,
+        footer_distance=footer_distance,
+        header_font=header_font,
+        header_font_size=header_font_size,
+        page_number_format=page_number_format
     )
     return 0
 
