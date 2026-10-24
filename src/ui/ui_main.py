@@ -76,6 +76,7 @@ class GeneratorWindow(QMainWindow):
         self.available_exts = []
         self.available_files = []  # 存储可用文件列表
         self.selected_files = []   # 存储用户选择的文件列表
+        self.file_selection_explicit = False
         self.file_order = []       # 存储文件顺序
         self.last_scan_count = 0
         self.last_stats = None  # 存储上次统计的详细信息
@@ -275,7 +276,7 @@ class GeneratorWindow(QMainWindow):
             'header_distance': self.header_distance_spin.value(),
             'footer_distance': self.footer_distance_spin.value(),
             'page_number_format': page_number_format,
-            'selected_files': self.selected_files if self.selected_files else None,
+            'selected_files': self.selected_files if self.file_selection_explicit else None,
             'pages_60_mode': self.pages_60_check.isChecked(),
             'export_pdf': self.export_pdf_check.isChecked(),
             'header_title_align': self.title_align_combo.currentText().strip() or '左对齐',
@@ -380,6 +381,7 @@ class GeneratorWindow(QMainWindow):
         
         if dialog.exec_() == QDialog.Accepted:
             self.selected_files = dialog.get_selected()
+            self.file_selection_explicit = True
             # 保存文件顺序
             self.file_order = dialog.get_all_ordered()
             self._notify('success', '文件选择完成', f'已选择 {len(self.selected_files)} 个文件')
@@ -458,17 +460,12 @@ class GeneratorWindow(QMainWindow):
         return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
-        """窗口关闭事件：确保后台工作线程被正确终止，防止残留后台进程"""
-        self.logger.info('正在关闭窗口，正在清理后台线程...')
-        # 强制停止扫描和生成线程
-        if self.worker and self.worker.isRunning():
-            self.logger.info('终止文档生成后台线程...')
-            self.worker.terminate()
-            self.worker.wait(1000)  # 最多等待 1 秒
-        if self.ext_worker and self.ext_worker.isRunning():
-            self.logger.info('终止后缀扫描后台线程...')
-            self.ext_worker.terminate()
-            self.ext_worker.wait(1000)
+        """有后台任务时阻止关闭，避免中断文档写入。"""
+        workers = (self.worker, self.ext_worker)
+        if any(worker and worker.isRunning() for worker in workers):
+            self._notify('warning', '任务仍在运行', '请等待后台任务完成后再关闭窗口，避免输出文件损坏。')
+            event.ignore()
+            return
         event.accept()
 
     def _check_word_conflict(self, config):
@@ -597,14 +594,23 @@ class GeneratorWindow(QMainWindow):
         else:
             total_lines = total_lines_info
         
-        self.status_label.setText('生成完成，共写入 {} 个文件，{} 行代码'.format(
-            result.get('file_count', 0), total_lines))
-        self.summary_title.setText('生成完成')
-        
         # 检查 PDF 导出结果
         pdf_path = result.get('pdf_path')
         pdf_warning = result.get('pdf_warning')
-        if pdf_path:
+        generation_warning = result.get('warning') or result.get('error')
+        if generation_warning:
+            self.status_label.setText('文档已生成，但所选功能未完成')
+            self.summary_title.setText('生成未完全成功')
+        else:
+            self.status_label.setText('生成完成，共写入 {} 个文件，{} 行代码'.format(
+                result.get('file_count', 0), total_lines))
+            self.summary_title.setText('生成完成')
+        if generation_warning:
+            details = ['60页模式未完成，已生成完整文档。', str(generation_warning)]
+            if pdf_warning:
+                details.append('PDF 导出失败：' + str(pdf_warning))
+            self._notify('warning', '文档已生成，但部分功能未完成', '\n'.join(details))
+        elif pdf_path:
             self._notify('success', '生成完成', '输出文件：{}\nPDF：{}'.format(
                 result.get('outfile', ''), pdf_path))
         elif pdf_warning:
@@ -677,6 +683,8 @@ class GeneratorWindow(QMainWindow):
             if not os.path.exists(exclude):
                 return False, '排除路径不存在：{}'.format(exclude)
         if mode == 'generate':
+            if config.get('selected_files') == []:
+                return False, '当前没有选中的源码文件，请重新选择文件'
             outfile = config['outfile']
             output_dir = os.path.dirname(outfile) if outfile else ''
             if output_dir and not os.path.isdir(output_dir):

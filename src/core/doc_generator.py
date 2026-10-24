@@ -26,7 +26,7 @@ def generate_code_doc(
         space_after, line_spacing, excludes,
         outfile, template_path=None,
         skip_blank_lines=True, skip_comment_lines=True,
-        encoding='utf-8', skip_dir_names=None, skip_file_names=None,
+        encoding='auto', skip_dir_names=None, skip_file_names=None,
         header_font='宋体', header_font_size=10.5,
         top_margin=2.5, bottom_margin=2.5,
         left_margin=2.5, right_margin=2.5,
@@ -90,7 +90,7 @@ def generate_code_doc(
     files = collect_code_files(indirs, exts, excludes, skip_dir_names, skip_file_names)
     
     # 如果指定了 selected_files，则只使用选中的文件，并保持其顺序
-    if selected_files:
+    if selected_files is not None:
         # 创建文件集合用于快速查找
         available_files_set = set(files)
         # 按照 selected_files 的顺序，只保留实际存在的文件

@@ -72,7 +72,7 @@ class CodeWriter:
             space_after=2.3, line_spacing=10.5,
             command_chars=None, document=None,
             template_path=None, skip_blank_lines=True,
-            skip_comment_lines=True, encoding='utf-8',
+            skip_comment_lines=True, encoding='auto',
             header_font='宋体', header_font_size=10.5,
             top_margin=2.5, bottom_margin=2.5,
             left_margin=2.5, right_margin=2.5,

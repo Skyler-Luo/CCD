@@ -61,7 +61,7 @@ class GenerateWorker(QThread):
                     DEFAULT_SKIP_FILES
                 )
                 # 如果指定了选中的文件，只统计选中的
-                if self.config.get('selected_files'):
+                if self.config.get('selected_files') is not None:
                     files = [f for f in files if f in self.config['selected_files']]
                 
                 stats = count_total_lines(
@@ -81,7 +81,10 @@ class GenerateWorker(QThread):
                 self.logger.info(f'开始生成文档: {self.config["outfile"]}')
                 result = generate_code_doc(**self.config)
                 result['mode'] = 'generate'
-                self.logger.info(f'文档生成成功: {result["file_count"]} 个文件, {result["total_lines"]["total_lines"]} 行')
+                if result.get('warning') or result.get('error'):
+                    self.logger.warning(f'文档已生成但部分功能失败: {result.get("warning") or result.get("error")}')
+                else:
+                    self.logger.info(f'文档生成成功: {result["file_count"]} 个文件, {result["total_lines"]["total_lines"]} 行')
                 self.finished.emit(result)
         except Exception as exc:
             error_msg = str(exc)

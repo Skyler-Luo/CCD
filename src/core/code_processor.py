@@ -3,10 +3,13 @@
 代码处理工具模块
 包含常量定义和通用工具函数
 """
+import ast
 import codecs
+import io
 import logging
 import os
 import re
+import tokenize
 from os.path import abspath
 
 logger = logging.getLogger(__name__)
@@ -81,7 +84,6 @@ COMMENT_REGEX_BY_LANG = {
     'java': re.compile(r'("(?:(?:\\.|[^"\\])*)"|\'(?:(?:\\.|[^\'\\])*)\'|`(?:(?:\\.|[^`\\])*)`)|//.*|/\*[\s\S]*?\*/', re.MULTILINE),
     'c': re.compile(r'("(?:(?:\\.|[^"\\])*)"|\'(?:(?:\\.|[^\'\\])*)\'|`(?:(?:\\.|[^`\\])*)`)|//.*|/\*[\s\S]*?\*/', re.MULTILINE),
     'cpp': re.compile(r'("(?:(?:\\.|[^"\\])*)"|\'(?:(?:\\.|[^\'\\])*)\'|`(?:(?:\\.|[^`\\])*)`)|//.*|/\*[\s\S]*?\*/', re.MULTILINE),
-    'python': re.compile(r'#.*|\'\'\'[\s\S]*?\'\'\'|"""[\s\S]*?"""', re.MULTILINE),
     'html': re.compile(r'<!--[\s\S]*?-->', re.MULTILINE),
     'xml': re.compile(r'<!--[\s\S]*?-->', re.MULTILINE),
     'css': re.compile(r'/\*[\s\S]*?\*/', re.MULTILINE),
@@ -89,12 +91,6 @@ COMMENT_REGEX_BY_LANG = {
     'ruby': re.compile(r'("(?:(?:\\.|[^"\\])*)"|\'(?:(?:\\.|[^\'\\])*)\'|`(?:(?:\\.|[^`\\])*)`)|#.*|=begin[\s\S]*?=end', re.MULTILINE),
     'perl': re.compile(r'("(?:(?:\\.|[^"\\])*)"|\'(?:(?:\\.|[^\'\\])*)\'|`(?:(?:\\.|[^`\\])*)`)|#.*|=begin[\s\S]*?=end', re.MULTILINE)
 }
-
-PYTHON_BLOCK_COMMENT = re.compile(r'\'\'\'[\s\S]*?\'\'\'|"""[\s\S]*?"""', re.MULTILINE)
-PYTHON_LINE_COMMENT = re.compile(
-    r'([rRuUfFbB]{0,2}"(?:(?:\\.|[^"\\])*)"|[rRuUfFbB]{0,2}\'(?:(?:\\.|[^\'\\])*)\')|#.*',
-    re.MULTILINE
-)
 
 # ==================== 路径处理工具 ====================
 
@@ -158,19 +154,23 @@ def is_binary_file(file_path):
 def decode_content(file_path, encoding):
     """读取源码文件并解码（支持auto自动检测）"""
     if encoding and encoding != 'auto':
-        with codecs.open(file_path, encoding=encoding, errors='ignore') as fp:
-            return fp.read()
+        try:
+            with codecs.open(file_path, encoding=encoding) as fp:
+                return fp.read()
+        except UnicodeDecodeError as exc:
+            raise UnicodeError(f'文件 {file_path} 无法按 {encoding} 解码，请检查编码设置') from exc
     try:
         with open(file_path, 'rb') as fp:
             data = fp.read()
         for name in ('utf-8-sig', 'utf-8', 'gb18030', 'gbk'):
             try:
                 return data.decode(name)
-            except UnicodeDecodeError:
+            except UnicodeDecodeError as exc:
+                last_error = exc
                 continue
-        return data.decode('utf-8', errors='ignore')
+        raise UnicodeError(f'文件 {file_path} 无法自动识别编码，请手动指定编码') from last_error
     except OSError:
-        return ''
+        raise
 
 # ==================== 语言和注释处理 ====================
 
@@ -183,8 +183,53 @@ def get_language_by_extension(file_path):
 def strip_comments(content, language):
     """按语言规则移除注释内容（尽量保留字符串字面量）"""
     if language == 'python':
-        content = PYTHON_BLOCK_COMMENT.sub('', content)
-        return PYTHON_LINE_COMMENT.sub(lambda m: m.group(1) if m.group(1) else '', content)
+        try:
+            tokens = list(tokenize.generate_tokens(io.StringIO(content).readline))
+        except (SyntaxError, tokenize.TokenError):
+            return content
+
+        spans = [
+            (token.start, token.end)
+            for token in tokens
+            if token.type == tokenize.COMMENT
+        ]
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            tree = None
+        if tree is not None:
+            source_lines = content.splitlines()
+            nodes = [tree]
+            nodes.extend(node for node in ast.walk(tree)
+                         if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)))
+            for node in nodes:
+                if not node.body:
+                    continue
+                first = node.body[0]
+                if (isinstance(first, ast.Expr)
+                        and isinstance(first.value, ast.Constant)
+                        and isinstance(first.value.value, str)):
+                    start_line = source_lines[first.lineno - 1]
+                    end_line = source_lines[first.end_lineno - 1]
+                    start_col = len(start_line.encode('utf-8')[:first.col_offset].decode('utf-8'))
+                    end_col = len(end_line.encode('utf-8')[:first.end_col_offset].decode('utf-8'))
+                    spans.append(((first.lineno, start_col), (first.end_lineno, end_col)))
+
+        lines = content.splitlines(keepends=True)
+        for (start_line, start_col), (end_line, end_col) in sorted(spans, reverse=True):
+            start_index = start_line - 1
+            end_index = end_line - 1
+            if start_index == end_index:
+                lines[start_index] = lines[start_index][:start_col] + lines[start_index][end_col:]
+            else:
+                first_line = lines[start_index]
+                ending = '\r\n' if first_line.endswith('\r\n') else first_line[-1:] if first_line.endswith(('\n', '\r')) else ''
+                lines[start_index] = first_line[:start_col] + ending
+                for index in range(start_index + 1, end_index):
+                    line = lines[index]
+                    lines[index] = '\r\n' if line.endswith('\r\n') else line[-1:] if line.endswith(('\n', '\r')) else ''
+                lines[end_index] = lines[end_index][end_col:]
+        return ''.join(lines)
     
     pattern = COMMENT_REGEX_BY_LANG.get(language)
     if not pattern:

@@ -69,8 +69,8 @@ from src.core.doc_generator import generate_code_doc
     help='docx模板文件路径'
 )
 @click.option(
-    '--encoding', default='utf-8',
-    help='源码文件编码，默认为utf-8'
+    '--encoding', default='auto',
+    help='源码文件编码，默认为自动检测'
 )
 @click.option(
     '--keep-blank-lines', is_flag=True,
